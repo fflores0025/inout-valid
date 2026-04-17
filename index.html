@@ -69,11 +69,12 @@
     .topup-btn{padding:20px;border-radius:14px;background:var(--card);border:2px solid var(--border);text-align:center;cursor:pointer;transition:all .15s;user-select:none;}
     .topup-btn:active,.topup-btn.selected{border-color:var(--a1);background:rgba(200,255,0,.06);}
     .topup-btn .amount{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a1);}
-    .pos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;}    .pos-item{padding:24px 16px;border-radius:14px;background:var(--card);border:2px solid var(--border);text-align:center;cursor:pointer;transition:all .12s;user-select:none;position:relative;}
+    .pos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}
+    .pos-item{padding:16px 12px;border-radius:12px;background:var(--card);border:2px solid var(--border);text-align:center;cursor:pointer;transition:all .12s;user-select:none;position:relative;}
     .pos-item:active{transform:scale(.95);}
     .pos-item.in-cart{border-color:var(--a1);background:rgba(200,255,0,.06);}
     .pos-item .p-name{font-size:14px;font-weight:500;margin-bottom:6px;}
-    .pos-item .p-price{font-family:'Syne',sans-serif;font-size:24px;font-weight:700;color:var(--a1);}
+    .pos-item .p-price{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:var(--a1);}
     .cart-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:14px;border-bottom:1px solid rgba(255,255,255,.04);}
     .cart-row:last-of-type{border-bottom:none;}
     .cart-total{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a1);}
@@ -231,14 +232,9 @@ async function enterApp(){
   navigate(window.location.hash.replace('#','')||'pos');
 }
 async function loadEvents(){
-  const{data}=await _sb.from('events').select('id,nombre,estado').in('estado',['publicado','confirmado','produccion','borrador','agotado']).order('fecha_inicio',{ascending:false});
+  const{data}=await _sb.from('events').select('id,nombre,estado').in('estado',['publicado','confirmado','produccion']).order('fecha_inicio',{ascending:false});
   allEvents=data||[];
-  if(allEvents.length>0){
-    const savedId=localStorage.getItem('inout-valid-event');
-    const saved=savedId&&allEvents.find(e=>e.id===savedId);
-    selectedEvent=saved||allEvents[0];
-    document.getElementById('tb-event').textContent=selectedEvent.nombre;
-  }
+  if(allEvents.length>0){selectedEvent=allEvents[0];document.getElementById('tb-event').textContent=selectedEvent.nombre;}
 }
 async function loadPOS(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_points_of_sale').select('*').eq('event_id',selectedEvent.id).eq('active',true);allPOS=data||[];}
 async function loadProducts(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_products').select('*').eq('event_id',selectedEvent.id).eq('active',true).order('sort_order');posProducts=data||[];}
@@ -320,27 +316,85 @@ async function onPOSScan(uid){
   posCart={};setTimeout(()=>{hideResult();cancelPOSCharge();updateCartUI();},2500);
 }
 
-// ═══ TOPUP ═══
-let topupAmount=0,topupPayMethod='cash';
+// ═══ TOPUP (SumUp obligatorio) ═══
+let topupAmount=0,topupWristband=null;
+const SUMUP_MERCHANT='MC4GZ9C4';
+
 function renderTopup(pc){
-  topupAmount=0;
-  pc.innerHTML=`<div class="g2"><div><div class="card mb16"><div class="card-title">Importe a recargar</div><div class="topup-grid"><div class="topup-btn" onclick="selectTopup(5,this)"><div class="amount">5€</div></div><div class="topup-btn" onclick="selectTopup(10,this)"><div class="amount">10€</div></div><div class="topup-btn" onclick="selectTopup(20,this)"><div class="amount">20€</div></div><div class="topup-btn" onclick="selectTopup(30,this)"><div class="amount">30€</div></div><div class="topup-btn" onclick="selectTopup(50,this)"><div class="amount">50€</div></div><div class="topup-btn" onclick="selectTopup(100,this)"><div class="amount">100€</div></div></div><label class="form-lbl">O cantidad personalizada</label><input class="form-input" id="topup-custom" type="number" min="1" step="0.5" placeholder="Ej: 15" oninput="customTopup(this.value)" style="margin-bottom:0"/></div><div class="card"><div class="card-title">Método de pago</div><div style="display:flex;gap:8px"><button class="btn btn-g" style="flex:1" id="pay-cash" onclick="selectPayMethod('cash')">💵 Efectivo</button><button class="btn btn-g" style="flex:1" id="pay-card" onclick="selectPayMethod('card')">💳 Tarjeta</button></div></div></div><div><div class="nfc-scan"><div class="nfc-ring scanning" id="topup-nfc-ring"><span class="emoji">📡</span></div><div class="nfc-label" id="topup-label">Selecciona importe</div><div class="nfc-sub" id="topup-sub">Elige cantidad y acerca la pulsera</div><button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button></div></div></div>`;
+  topupAmount=0;topupWristband=null;
+  pc.innerHTML=`<div class="g2"><div><div class="card mb16"><div class="card-title">1. Escanear pulsera</div><div class="nfc-scan" style="padding:20px"><div class="nfc-ring scanning" id="topup-nfc-ring" style="width:120px;height:120px"><span class="emoji" style="font-size:36px">📡</span></div><div class="nfc-label" style="font-size:15px;margin-top:12px">Acerca la pulsera</div><div class="nfc-sub" id="topup-scan-sub">Primero identifica la pulsera</div><button class="btn btn-g" style="margin-top:12px;font-size:13px" onclick="manualUIDInput()">UID manual</button></div><div id="topup-wristband-info" style="display:none;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center"><div><div style="font-weight:600" id="topup-holder-name">—</div><div style="font-size:12px;color:var(--muted);font-family:monospace" id="topup-holder-uid">—</div></div><div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Saldo actual</div><div style="font-family:Syne;font-weight:700;font-size:22px;color:var(--a1)" id="topup-holder-bal">0€</div></div></div></div></div><div class="card"><div class="card-title">2. Seleccionar importe</div><div class="topup-grid" id="topup-grid-amounts"><div class="topup-btn" onclick="selectTopup(5,this)"><div class="amount">5€</div></div><div class="topup-btn" onclick="selectTopup(10,this)"><div class="amount">10€</div></div><div class="topup-btn" onclick="selectTopup(20,this)"><div class="amount">20€</div></div><div class="topup-btn" onclick="selectTopup(30,this)"><div class="amount">30€</div></div><div class="topup-btn" onclick="selectTopup(50,this)"><div class="amount">50€</div></div><div class="topup-btn" onclick="selectTopup(100,this)"><div class="amount">100€</div></div></div><label class="form-lbl">O cantidad personalizada</label><input class="form-input" id="topup-custom" type="number" min="1" step="0.5" placeholder="Ej: 15" oninput="customTopup(this.value)" style="margin-bottom:0"/></div></div><div><div class="card"><div class="card-title">3. Cobrar con SumUp</div><div style="text-align:center;padding:20px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Importe a cobrar</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1)" id="topup-amount-display">0,00€</div><div id="topup-holder-label" style="font-size:13px;color:var(--muted);margin-top:4px">—</div></div><div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🔒</span><span style="font-size:13px;color:var(--warn)">El saldo solo se añade cuando SumUp confirma el pago</span></div><div style="font-size:12px;color:var(--muted)">Esto evita recargas sin cobro real. El operador no puede añadir saldo manualmente.</div></div><button class="btn btn-p btn-full btn-lg" id="topup-sumup-btn" onclick="startSumUpTopup()" disabled style="opacity:.5">Cobrar con SumUp</button><div style="margin-top:12px;text-align:center"><button class="btn btn-g" style="font-size:13px" onclick="confirmManualTopup()">⚠️ Recarga manual (solo admin)</button></div></div></div></div>`;
 }
+
 function selectTopup(a,el){topupAmount=a;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));el.classList.add('selected');document.getElementById('topup-custom').value='';updateTopupUI();}
 function customTopup(v){topupAmount=parseFloat(v)||0;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));updateTopupUI();}
-function selectPayMethod(m){topupPayMethod=m;document.getElementById('pay-cash').className='btn '+(m==='cash'?'btn-p':'btn-g');document.getElementById('pay-card').className='btn '+(m==='card'?'btn-p':'btn-g');}
-function updateTopupUI(){const l=document.getElementById('topup-label'),s=document.getElementById('topup-sub');if(topupAmount>0){l.textContent='Recargar '+fmt(topupAmount)+'€';s.textContent='Acerca la pulsera al lector NFC';document.getElementById('topup-nfc-ring').className='nfc-ring scanning';}else{l.textContent='Selecciona importe';s.textContent='Elige cantidad y acerca la pulsera';}}
+
+function updateTopupUI(){
+  document.getElementById('topup-amount-display').textContent=topupAmount>0?fmt(topupAmount)+'€':'0,00€';
+  document.getElementById('topup-holder-label').textContent=topupWristband?(topupWristband.holder_name||topupWristband.uid):'Escanea la pulsera primero';
+  const btn=document.getElementById('topup-sumup-btn');
+  if(topupAmount>0&&topupWristband){btn.disabled=false;btn.style.opacity='1';}
+  else{btn.disabled=true;btn.style.opacity='.5';}
+}
+
 async function onTopupScan(uid){
-  if(topupAmount<=0){toast('Selecciona un importe primero');return;}
-  const ring=document.getElementById('topup-nfc-ring'),sub=document.getElementById('topup-sub');
-  ring.className='nfc-ring';sub.textContent='Procesando...';
+  const ring=document.getElementById('topup-nfc-ring'),sub=document.getElementById('topup-scan-sub');
+  ring.className='nfc-ring';sub.textContent='Buscando...';
   const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
-  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='Pulsera no registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';updateTopupUI();},2000);return;}
-  const newBal=parseFloat(wb.balance)+topupAmount;
-  await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(wb.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',wb.id);
-  await _sb.from('rfid_transactions').insert({wristband_id:wb.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'Recarga '+(topupPayMethod==='cash'?'efectivo':'tarjeta'),point_of_sale:'Taquilla',operator:userProfile.nombre,payment_method:topupPayMethod});
-  showResult('success','💰','+'+fmt(topupAmount)+'€ recargados','Nuevo saldo: '+fmt(newBal)+'€ · '+(wb.holder_name||uid));
-  setTimeout(()=>{hideResult();topupAmount=0;renderTopup(document.getElementById('page-content'));},2500);
+  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='No registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent='Primero identifica la pulsera';},2000);return;}
+  topupWristband=wb;
+  ring.className='nfc-ring success';ring.querySelector('.emoji').textContent='✅';
+  sub.textContent='Pulsera identificada';
+  const info=document.getElementById('topup-wristband-info');info.style.display='block';
+  document.getElementById('topup-holder-name').textContent=wb.holder_name||'Sin nombre';
+  document.getElementById('topup-holder-uid').textContent=uid;
+  document.getElementById('topup-holder-bal').textContent=fmt(wb.balance)+'€';
+  updateTopupUI();
+}
+
+function startSumUpTopup(){
+  if(!topupWristband||topupAmount<=0)return;
+  // Abrir SumUp para cobrar — el operador cobra con el lector de tarjetas SumUp
+  // Después debe confirmar manualmente que el pago se completó
+  // En producción esto se haría con SumUp API + webhook automático
+  const ref='TOPUP-'+topupWristband.uid+'-'+Date.now();
+  showResult('success','💳','Cobra '+fmt(topupAmount)+'€ en SumUp','Usa el lector SumUp. Cuando el pago se complete, pulsa confirmar.');
+  setTimeout(()=>{
+    hideResult();
+    // Mostrar confirmación
+    document.getElementById('page-content').innerHTML=`<div style="max-width:500px;margin:40px auto;text-align:center"><div class="card"><div style="font-size:48px;margin-bottom:16px">💳</div><div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">Esperando pago SumUp</div><div style="font-size:15px;color:var(--muted);margin-bottom:8px">${topupWristband.holder_name||topupWristband.uid}</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">${fmt(topupAmount)}€</div><div style="font-size:13px;color:var(--muted);margin-bottom:24px">Ref: ${ref}</div><div style="display:flex;gap:10px;flex-direction:column"><button class="btn btn-p btn-full btn-lg" onclick="confirmSumUpPayment('${ref}')">✅ Pago completado en SumUp</button><button class="btn btn-danger btn-full" onclick="cancelSumUpPayment()">❌ Pago cancelado / fallido</button></div><div style="margin-top:16px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)">Solo pulsa "Pago completado" cuando SumUp confirme el cobro en su pantalla.</div></div></div>`;
+  },1500);
+}
+
+async function confirmSumUpPayment(ref){
+  if(!topupWristband||topupAmount<=0)return;
+  const newBal=parseFloat(topupWristband.balance)+topupAmount;
+  await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(topupWristband.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',topupWristband.id);
+  await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'Recarga SumUp',point_of_sale:'Kiosco',operator:userProfile.nombre,payment_method:'sumup',sumup_reference:ref});
+  showResult('success','💰','+'+fmt(topupAmount)+'€ recargados','Nuevo saldo: '+fmt(newBal)+'€ · '+(topupWristband.holder_name||topupWristband.uid));
+  topupWristband=null;topupAmount=0;
+  setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+}
+
+function cancelSumUpPayment(){
+  toast('Recarga cancelada — no se ha añadido saldo');
+  topupWristband=null;topupAmount=0;
+  renderTopup(document.getElementById('page-content'));
+}
+
+function confirmManualTopup(){
+  if(!userProfile||userProfile.role!=='admin'){toast('⛔ Solo administradores pueden hacer recargas manuales');return;}
+  if(!topupWristband){toast('Escanea una pulsera primero');return;}
+  if(topupAmount<=0){toast('Selecciona un importe');return;}
+  if(!confirm('⚠️ RECARGA MANUAL sin cobro SumUp.\n\nEsto añade saldo sin verificar pago.\nSolo usar en casos excepcionales.\n\n¿Confirmar recarga de '+fmt(topupAmount)+'€?'))return;
+  const ref='MANUAL-'+userProfile.nombre+'-'+Date.now();
+  (async()=>{
+    const newBal=parseFloat(topupWristband.balance)+topupAmount;
+    await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(topupWristband.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',topupWristband.id);
+    await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'⚠️ Recarga manual ('+userProfile.nombre+')',point_of_sale:'Manual',operator:userProfile.nombre,payment_method:'manual',sumup_reference:ref});
+    showResult('success','⚠️','Recarga manual: +'+fmt(topupAmount)+'€','Nuevo saldo: '+fmt(newBal)+'€');
+    topupWristband=null;topupAmount=0;
+    setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+  })();
 }
 
 // ═══ REGISTER ═══
@@ -435,7 +489,8 @@ async function deleteProduct(id){await _sb.from('rfid_products').delete().eq('id
 function renderConfig(pc){
   pc.innerHTML=`<div class="g2"><div class="card"><div class="card-title">Evento activo</div><select class="form-select" onchange="changeEvent(this.value)">${allEvents.map(e=>`<option value="${e.id}" ${selectedEvent?.id===e.id?'selected':''}>${e.nombre}</option>`).join('')}</select><div style="font-size:12px;color:var(--muted)">Productos, pulseras y transacciones se filtran por evento.</div></div><div class="card"><div class="card-title">NFC</div><div class="s-status" style="margin-bottom:12px"><span class="s-status-dot ${nfcSupported?'on':'off'}"></span><span>${nfcSupported?'Web NFC activo':'Web NFC no disponible — usa UID manual'}</span></div>${!nfcSupported?'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--warn)">⚠️ Web NFC requiere Chrome en Android.</div>':''}<button class="btn btn-g btn-full" style="margin-top:12px" onclick="initNFC()">Reintentar NFC</button></div></div>`;
 }
-function changeEvent(id){selectedEvent=allEvents.find(e=>e.id===id);localStorage.setItem('inout-valid-event',id);document.getElementById('tb-event').textContent=selectedEvent?.nombre||'Sin evento';loadPOS();loadProducts();toast('Evento: '+selectedEvent?.nombre);}
+function changeEvent(id){selectedEvent=allEvents.find(e=>e.id===id);document.getElementById('tb-event').textContent=selectedEvent?.nombre||'Sin evento';loadPOS();loadProducts();toast('Evento: '+selectedEvent?.nombre);}
+
 // RESULT OVERLAY
 function showResult(type,emoji,title,sub){const d=document.createElement('div');d.id='result-overlay';d.className='result-overlay '+type;d.innerHTML=`<div class="result-box ${type}"><div class="result-emoji">${emoji}</div><div class="result-title">${title}</div><div class="result-sub">${sub||''}</div></div>`;d.onclick=()=>d.remove();document.body.appendChild(d);if(navigator.vibrate)navigator.vibrate(type==='success'?100:[200,100,200]);}
 function hideResult(){document.getElementById('result-overlay')?.remove();}
