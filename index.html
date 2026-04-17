@@ -233,7 +233,12 @@ async function enterApp(){
 async function loadEvents(){
   const{data}=await _sb.from('events').select('id,nombre,estado').in('estado',['publicado','confirmado','produccion','borrador','agotado']).order('fecha_inicio',{ascending:false});
   allEvents=data||[];
-  if(allEvents.length>0){selectedEvent=allEvents[0];document.getElementById('tb-event').textContent=selectedEvent.nombre;}
+  if(allEvents.length>0){
+    const savedId=localStorage.getItem('inout-valid-event');
+    const saved=savedId&&allEvents.find(e=>e.id===savedId);
+    selectedEvent=saved||allEvents[0];
+    document.getElementById('tb-event').textContent=selectedEvent.nombre;
+  }
 }
 async function loadPOS(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_points_of_sale').select('*').eq('event_id',selectedEvent.id).eq('active',true);allPOS=data||[];}
 async function loadProducts(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_products').select('*').eq('event_id',selectedEvent.id).eq('active',true).order('sort_order');posProducts=data||[];}
@@ -430,8 +435,7 @@ async function deleteProduct(id){await _sb.from('rfid_products').delete().eq('id
 function renderConfig(pc){
   pc.innerHTML=`<div class="g2"><div class="card"><div class="card-title">Evento activo</div><select class="form-select" onchange="changeEvent(this.value)">${allEvents.map(e=>`<option value="${e.id}" ${selectedEvent?.id===e.id?'selected':''}>${e.nombre}</option>`).join('')}</select><div style="font-size:12px;color:var(--muted)">Productos, pulseras y transacciones se filtran por evento.</div></div><div class="card"><div class="card-title">NFC</div><div class="s-status" style="margin-bottom:12px"><span class="s-status-dot ${nfcSupported?'on':'off'}"></span><span>${nfcSupported?'Web NFC activo':'Web NFC no disponible — usa UID manual'}</span></div>${!nfcSupported?'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--warn)">⚠️ Web NFC requiere Chrome en Android.</div>':''}<button class="btn btn-g btn-full" style="margin-top:12px" onclick="initNFC()">Reintentar NFC</button></div></div>`;
 }
-function changeEvent(id){selectedEvent=allEvents.find(e=>e.id===id);document.getElementById('tb-event').textContent=selectedEvent?.nombre||'Sin evento';loadPOS();loadProducts();toast('Evento: '+selectedEvent?.nombre);}
-
+function changeEvent(id){selectedEvent=allEvents.find(e=>e.id===id);localStorage.setItem('inout-valid-event',id);document.getElementById('tb-event').textContent=selectedEvent?.nombre||'Sin evento';loadPOS();loadProducts();toast('Evento: '+selectedEvent?.nombre);}
 // RESULT OVERLAY
 function showResult(type,emoji,title,sub){const d=document.createElement('div');d.id='result-overlay';d.className='result-overlay '+type;d.innerHTML=`<div class="result-box ${type}"><div class="result-emoji">${emoji}</div><div class="result-title">${title}</div><div class="result-sub">${sub||''}</div></div>`;d.onclick=()=>d.remove();document.body.appendChild(d);if(navigator.vibrate)navigator.vibrate(type==='success'?100:[200,100,200]);}
 function hideResult(){document.getElementById('result-overlay')?.remove();}
