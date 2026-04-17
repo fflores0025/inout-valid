@@ -353,29 +353,80 @@ async function onTopupScan(uid){
 
 function startSumUpTopup(){
   if(!topupWristband||topupAmount<=0)return;
-  // Abrir SumUp para cobrar — el operador cobra con el lector de tarjetas SumUp
-  // Después debe confirmar manualmente que el pago se completó
-  // En producción esto se haría con SumUp API + webhook automático
-  const ref='TOPUP-'+topupWristband.uid+'-'+Date.now();
-  showResult('success','💳','Cobra '+fmt(topupAmount)+'€ en SumUp','Usa el lector SumUp. Cuando el pago se complete, pulsa confirmar.');
-  setTimeout(()=>{
-    hideResult();
-    // Mostrar confirmación
-    document.getElementById('page-content').innerHTML=`<div style="max-width:500px;margin:40px auto;text-align:center"><div class="card"><div style="font-size:48px;margin-bottom:16px">💳</div><div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">Esperando pago SumUp</div><div style="font-size:15px;color:var(--muted);margin-bottom:8px">${topupWristband.holder_name||topupWristband.uid}</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">${fmt(topupAmount)}€</div><div style="font-size:13px;color:var(--muted);margin-bottom:24px">Ref: ${ref}</div><div style="display:flex;gap:10px;flex-direction:column"><button class="btn btn-p btn-full btn-lg" onclick="confirmSumUpPayment('${ref}')">✅ Pago completado en SumUp</button><button class="btn btn-danger btn-full" onclick="cancelSumUpPayment()">❌ Pago cancelado / fallido</button></div><div style="margin-top:16px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)">Solo pulsa "Pago completado" cuando SumUp confirme el cobro en su pantalla.</div></div></div>`;
-  },1500);
+  const btn=document.getElementById('topup-sumup-btn');
+  btn.disabled=true;btn.textContent='Creando pago...';
+
+  // Llamar al backend de inout-check para crear el checkout de SumUp
+  fetch('https://inout-check.vercel.app/api/rfid/topup',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      wristband_id:topupWristband.id,
+      uid:topupWristband.uid,
+      amount:topupAmount,
+      event_id:selectedEvent?.id,
+      operator:userProfile.nombre,
+    })
+  })
+  .then(r=>r.json())
+  .then(data=>{
+    if(data.error){toast('Error: '+data.error);btn.disabled=false;btn.textContent='Cobrar con SumUp';return;}
+    // Guardar datos para verificar después
+    sessionStorage.setItem('topup_sumup_id',data.sumup_checkout_id);
+    sessionStorage.setItem('topup_wristband_id',topupWristband.id);
+    sessionStorage.setItem('topup_amount',String(topupAmount));
+    sessionStorage.setItem('topup_ref',data.reference);
+    // Redirigir a la pasarela de pago de SumUp
+    window.open(data.checkout_url,'_blank');
+    // Mostrar pantalla de espera
+    document.getElementById('page-content').innerHTML=`<div style="max-width:500px;margin:40px auto;text-align:center"><div class="card"><div style="font-size:48px;margin-bottom:16px">💳</div><div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">Pago en proceso</div><div style="font-size:15px;color:var(--muted);margin-bottom:8px">${topupWristband.holder_name||topupWristband.uid}</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">${fmt(topupAmount)}€</div><div style="font-size:13px;color:var(--muted);margin-bottom:24px">Se ha abierto la pasarela de pago de SumUp</div><div id="topup-verify-status" style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;font-size:14px;color:var(--warn)">⏳ Esperando confirmación de pago...</div><div style="display:flex;gap:10px;flex-direction:column"><button class="btn btn-p btn-full btn-lg" onclick="checkTopupPayment()">🔄 Verificar pago</button><button class="btn btn-danger btn-full" onclick="cancelSumUpPayment()">❌ Cancelar</button></div></div></div>`;
+    // Auto-verificar cada 5 segundos
+    topupCheckInterval=setInterval(()=>checkTopupPayment(),5000);
+  })
+  .catch(err=>{toast('Error de conexión: '+err.message);btn.disabled=false;btn.textContent='Cobrar con SumUp';});
+}
+
+let topupCheckInterval=null;
+
+function checkTopupPayment(){
+  const sumupId=sessionStorage.getItem('topup_sumup_id');
+  const wbId=sessionStorage.getItem('topup_wristband_id');
+  const amount=sessionStorage.getItem('topup_amount');
+  const ref=sessionStorage.getItem('topup_ref');
+  if(!sumupId||!wbId)return;
+  const statusEl=document.getElementById('topup-verify-status');
+  if(statusEl)statusEl.innerHTML='🔄 Verificando con SumUp...';
+
+  fetch(`https://inout-check.vercel.app/api/rfid/verify-topup?wristband=${wbId}&amount=${amount}&ref=${ref}&sumup_id=${sumupId}`)
+  .then(r=>r.json())
+  .then(data=>{
+    if(data.status==='completed'||data.status==='already_completed'){
+      if(topupCheckInterval){clearInterval(topupCheckInterval);topupCheckInterval=null;}
+      sessionStorage.removeItem('topup_sumup_id');
+      sessionStorage.removeItem('topup_wristband_id');
+      sessionStorage.removeItem('topup_amount');
+      sessionStorage.removeItem('topup_ref');
+      showResult('success','💰','+'+fmt(parseFloat(amount))+'€ recargados','Nuevo saldo: '+fmt(data.balance)+'€ · '+(data.holder_name||''));
+      topupWristband=null;topupAmount=0;
+      setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+    }else{
+      if(statusEl)statusEl.innerHTML='⏳ Pago aún no confirmado ('+( data.sumup_status||'pendiente')+').<br><span style="font-size:12px;color:var(--muted)">Se verifica automáticamente cada 5 segundos.</span>';
+    }
+  })
+  .catch(()=>{if(statusEl)statusEl.textContent='⚠️ Error verificando. Reintenta.';});
 }
 
 async function confirmSumUpPayment(ref){
-  if(!topupWristband||topupAmount<=0)return;
-  const newBal=parseFloat(topupWristband.balance)+topupAmount;
-  await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(topupWristband.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',topupWristband.id);
-  await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'Recarga SumUp',point_of_sale:'Kiosco',operator:userProfile.nombre,payment_method:'sumup',sumup_reference:ref});
-  showResult('success','💰','+'+fmt(topupAmount)+'€ recargados','Nuevo saldo: '+fmt(newBal)+'€ · '+(topupWristband.holder_name||topupWristband.uid));
-  topupWristband=null;topupAmount=0;
-  setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+  // Legacy — ya no se usa, el pago se verifica automáticamente
+  checkTopupPayment();
 }
 
 function cancelSumUpPayment(){
+  if(topupCheckInterval){clearInterval(topupCheckInterval);topupCheckInterval=null;}
+  sessionStorage.removeItem('topup_sumup_id');
+  sessionStorage.removeItem('topup_wristband_id');
+  sessionStorage.removeItem('topup_amount');
+  sessionStorage.removeItem('topup_ref');
   toast('Recarga cancelada — no se ha añadido saldo');
   topupWristband=null;topupAmount=0;
   renderTopup(document.getElementById('page-content'));
