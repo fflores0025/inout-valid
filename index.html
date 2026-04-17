@@ -232,7 +232,7 @@ async function enterApp(){
   navigate(window.location.hash.replace('#','')||'pos');
 }
 async function loadEvents(){
-  const{data}=await _sb.from('events').select('id,nombre,estado').in('estado',['publicado','confirmado','produccion']).order('fecha_inicio',{ascending:false});
+  const{data}=await _sb.from('events').select('id,nombre,estado').in('estado',['publicado','confirmado','produccion','borrador','agotado']).order('fecha_inicio',{ascending:false});
   allEvents=data||[];
   if(allEvents.length>0){selectedEvent=allEvents[0];document.getElementById('tb-event').textContent=selectedEvent.nombre;}
 }
