@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="theme-color" content="#07070f"/>
+  <title>InOut · RFID System</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+    :root{
+      --bg:#07070f;--surf:#0d0d1a;--card:#111120;--border:#1c1c2e;
+      --a1:#c8ff00;--a2:#ff3cac;--a3:#00d4ff;
+      --txt:#e6e6f0;--muted:#60607a;--r:14px;
+      --success:#00e676;--danger:#ff1744;--warn:#ffab00;
+    }
+    html,body{height:100%;font-family:'DM Sans',sans-serif;font-size:15px;color:var(--txt);background:var(--bg);overflow:hidden;touch-action:manipulation;}
+    ::-webkit-scrollbar{width:3px;height:3px;}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+    .app{display:flex;height:100vh;height:100dvh;}
+    .sidebar{width:220px;background:var(--surf);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
+    .main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+    .topbar{height:52px;background:var(--surf);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0;}
+    .page{flex:1;overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch;}
+    .s-logo{padding:18px 16px;font-family:'Syne',sans-serif;font-weight:800;font-size:18px;letter-spacing:-.5px;border-bottom:1px solid var(--border);}
+    .s-logo small{display:block;font-family:'DM Sans',sans-serif;font-weight:400;font-size:10px;color:var(--a3);text-transform:uppercase;letter-spacing:1.5px;margin-top:3px;}
+    .logo-dot{color:var(--a1);}
+    .s-nav{flex:1;padding:10px 0;overflow-y:auto;}
+    .s-item{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;color:var(--muted);font-size:14px;border-left:3px solid transparent;transition:all .15s;user-select:none;}
+    .s-item:active{background:rgba(255,255,255,.05);}
+    .s-item.active{color:var(--a1);border-left-color:var(--a1);background:rgba(200,255,0,.05);}
+    .s-item .icon{font-size:18px;width:24px;text-align:center;}
+    .s-sec{padding:14px 16px 6px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600;}
+    .s-bottom{padding:12px 16px;border-top:1px solid var(--border);}
+    .s-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);}
+    .s-status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+    .s-status-dot.on{background:var(--success);box-shadow:0 0 8px rgba(0,230,118,.5);}
+    .s-status-dot.off{background:var(--danger);}
+    .tb-title{font-family:'Syne',sans-serif;font-weight:700;font-size:16px;}
+    .tb-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+    .tb-event{font-size:12px;color:var(--a3);padding:4px 10px;border-radius:6px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.15);}
+    .tb-user{font-size:12px;color:var(--muted);}
+    .burger{display:none;background:none;border:none;color:var(--txt);font-size:22px;cursor:pointer;padding:4px;}
+    .nfc-scan{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center;}
+    .nfc-ring{width:180px;height:180px;border-radius:50%;border:3px solid var(--border);display:flex;align-items:center;justify-content:center;position:relative;transition:all .3s;}
+    .nfc-ring.scanning{border-color:var(--a3);animation:nfcPulse 2s ease-in-out infinite;}
+    .nfc-ring.success{border-color:var(--success);background:rgba(0,230,118,.06);}
+    .nfc-ring.error{border-color:var(--danger);background:rgba(255,23,68,.06);}
+    .nfc-ring .emoji{font-size:52px;}
+    .nfc-label{margin-top:16px;font-family:'Syne',sans-serif;font-weight:700;font-size:18px;}
+    .nfc-sub{color:var(--muted);font-size:13px;margin-top:6px;}
+    @keyframes nfcPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,212,255,.3)}50%{box-shadow:0 0 0 20px rgba(0,212,255,0)}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:20px;}
+    .card-title{font-family:'Syne',sans-serif;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:14px;}
+    .stat-val{font-family:'Syne',sans-serif;font-size:32px;font-weight:700;}
+    .stat-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:14px 24px;border-radius:12px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:15px;font-weight:600;transition:all .12s;user-select:none;min-height:48px;white-space:nowrap;}
+    .btn:active{transform:scale(.96);opacity:.85;}
+    .btn-p{background:var(--a1);color:#000;}
+    .btn-danger{background:rgba(255,23,68,.12);color:var(--danger);border:1px solid rgba(255,23,68,.2);}
+    .btn-g{background:transparent;color:var(--muted);border:1px solid var(--border);}
+    .btn-g:active{border-color:var(--a1);color:var(--a1);}
+    .btn-full{width:100%;}
+    .btn-lg{padding:18px 32px;font-size:17px;border-radius:14px;min-height:56px;}
+    .topup-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;}
+    .topup-btn{padding:20px;border-radius:14px;background:var(--card);border:2px solid var(--border);text-align:center;cursor:pointer;transition:all .15s;user-select:none;}
+    .topup-btn:active,.topup-btn.selected{border-color:var(--a1);background:rgba(200,255,0,.06);}
+    .topup-btn .amount{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a1);}
+    .pos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;}
+    .pos-item{padding:16px 12px;border-radius:12px;background:var(--card);border:2px solid var(--border);text-align:center;cursor:pointer;transition:all .12s;user-select:none;position:relative;}
+    .pos-item:active{transform:scale(.95);}
+    .pos-item.in-cart{border-color:var(--a1);background:rgba(200,255,0,.06);}
+    .pos-item .p-name{font-size:14px;font-weight:500;margin-bottom:6px;}
+    .pos-item .p-price{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:var(--a1);}
+    .cart-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:14px;border-bottom:1px solid rgba(255,255,255,.04);}
+    .cart-row:last-of-type{border-bottom:none;}
+    .cart-total{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a1);}
+    .form-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:block;}
+    .form-input,.form-select{width:100%;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--txt);font-family:'DM Sans',sans-serif;font-size:15px;outline:none;transition:border-color .15s;margin-bottom:14px;min-height:48px;}
+    .form-input:focus,.form-select:focus{border-color:var(--a1);}
+    .result-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:500;animation:fadeIn .2s ease;}
+    .result-overlay.success{background:rgba(0,230,118,.12);}
+    .result-overlay.error{background:rgba(255,23,68,.12);}
+    .result-box{text-align:center;padding:40px;border-radius:20px;background:var(--card);border:2px solid;min-width:300px;}
+    .result-box.success{border-color:var(--success);}
+    .result-box.error{border-color:var(--danger);}
+    .result-emoji{font-size:64px;margin-bottom:16px;}
+    .result-title{font-family:'Syne',sans-serif;font-size:24px;font-weight:800;margin-bottom:8px;}
+    .result-sub{font-size:15px;color:var(--muted);}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);background-image:radial-gradient(ellipse 50% 35% at 50% 0%,rgba(200,255,0,.07) 0%,transparent 60%);}
+    .login-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:36px 32px;}
+    .login-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:28px;margin-bottom:4px;}
+    .login-sub{color:var(--muted);font-size:13px;margin-bottom:28px;}
+    .badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+    .b-green{background:rgba(0,230,118,.12);color:var(--success);}
+    .b-red{background:rgba(255,23,68,.12);color:var(--danger);}
+    .b-blue{background:rgba(0,212,255,.12);color:var(--a3);}
+    .b-gray{background:rgba(107,107,136,.15);color:var(--muted);}
+    .b-yellow{background:rgba(255,171,0,.12);color:var(--warn);}
+    .balance-big{font-family:'Syne',sans-serif;font-size:52px;font-weight:800;color:var(--a1);text-align:center;line-height:1;}
+    .balance-label{text-align:center;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:6px;}
+    .access-full{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:600;animation:fadeIn .15s ease;}
+    .access-full.granted{background:rgba(0,40,10,.95);}
+    .access-full.denied{background:rgba(50,0,0,.95);}
+    .access-text{font-family:'Syne',sans-serif;font-size:36px;font-weight:800;}
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+    .mb16{margin-bottom:16px;}.mb24{margin-bottom:24px;}
+    .tbl-wrap{overflow-x:auto;border-radius:10px;}
+    table{width:100%;border-collapse:collapse;}
+    thead th{text-align:left;padding:10px 12px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);white-space:nowrap;}
+    tbody td{padding:12px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px;}
+    tbody tr:last-child td{border-bottom:none;}
+    #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 24px;font-size:14px;z-index:1000;transition:transform .3s;white-space:nowrap;font-weight:500;}
+    #toast.show{transform:translateX(-50%) translateY(0);}
+    @media(max-width:768px){
+      .sidebar{position:fixed;left:0;top:0;height:100%;z-index:300;transform:translateX(-100%);transition:transform .25s;width:260px;}
+      .sidebar.open{transform:translateX(0);}
+      .burger{display:flex!important;}
+      .g2,.g3{grid-template-columns:1fr;}
+      .balance-big{font-size:40px;}
+      .nfc-ring{width:140px;height:140px;}
+      .nfc-ring .emoji{font-size:40px;}
+      .topup-btn .amount{font-size:22px;}
+    }
+    @media(min-width:769px){.burger{display:none;}}
+  </style>
+</head>
+<body>
+<div id="toast"></div>
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">InOut<span class="logo-dot">.</span></div>
+    <div class="login-sub">RFID & Cashless System</div>
+    <div id="login-error" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
+    <label class="form-lbl">Email</label>
+    <input class="form-input" id="login-email" type="email" placeholder="tu@inoutmedia.es" autocomplete="email"/>
+    <label class="form-lbl">Contraseña</label>
+    <input class="form-input" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password"/>
+    <button class="btn btn-p btn-full btn-lg" onclick="doLogin()">Entrar</button>
+    <div style="margin-top:12px;text-align:center;font-size:12px;color:var(--muted)">Solo personal autorizado</div>
+  </div>
+</div>
+<div id="app" style="display:none" class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="s-logo">InOut<span class="logo-dot">.</span><small>RFID System</small></div>
+    <div class="s-nav" id="s-nav"></div>
+    <div class="s-bottom">
+      <div class="s-status"><span class="s-status-dot" id="nfc-status-dot"></span><span id="nfc-status-text">NFC: Detectando...</span></div>
+      <div style="margin-top:10px"><button class="btn btn-g btn-full" style="padding:8px;font-size:12px" onclick="doLogout()">Cerrar sesión</button></div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="burger" onclick="toggleSidebar()">☰</button>
+      <span class="tb-title" id="tb-title">—</span>
+      <div class="tb-right">
+        <span class="tb-event" id="tb-event">Sin evento</span>
+        <span class="tb-user" id="tb-user">—</span>
+      </div>
+    </div>
+    <div class="page" id="page-content"></div>
+  </div>
+</div>
+<div id="overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:250" onclick="closeSidebar()"></div>
+
+<script>
+const SB_URL='https://raoxkjnwrccoxjcipfpv.supabase.co';
+const SB_KEY='sb_publishable__-K1pC4bOJHRf8JQ__OOzg_jqLxlGla';
+const _sb=supabase.createClient(SB_URL,SB_KEY);
+
+let currentUser=null,userProfile=null,currentPage='pos';
+let selectedEvent=null,allEvents=[];
+let posProducts=[],posCart={},allPOS=[];
+let nfcReader=null,nfcSupported=false,lastScannedUID=null;
+
+const NAV=[
+  {sec:'Operaciones'},
+  {key:'pos',icon:'🛒',label:'Punto de Venta'},
+  {key:'topup',icon:'💳',label:'Recarga'},
+  {key:'register',icon:'📝',label:'Registrar Pulsera'},
+  {key:'access',icon:'🚪',label:'Control Acceso'},
+  {sec:'Consultas'},
+  {key:'balance',icon:'💰',label:'Consultar Saldo'},
+  {key:'transactions',icon:'📋',label:'Movimientos'},
+  {sec:'Gestión'},
+  {key:'dashboard',icon:'📊',label:'Dashboard'},
+  {key:'products',icon:'🏷️',label:'Productos'},
+  {key:'config',icon:'⚙️',label:'Configuración'},
+];
+const PAGE_TITLES={pos:'Punto de Venta',topup:'Recarga de Saldo',register:'Registrar Pulsera',access:'Control de Acceso',balance:'Consultar Saldo',transactions:'Movimientos',dashboard:'Dashboard',products:'Productos',config:'Configuración'};
+
+function toast(msg,ms=2500){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),ms);}
+function fmt(n){return(n||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtDate(d){return new Date(d).toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}
+
+// AUTH
+async function doLogin(){
+  const email=document.getElementById('login-email').value.trim();
+  const pass=document.getElementById('login-pass').value;
+  const err=document.getElementById('login-error');
+  err.style.display='none';
+  if(!email||!pass){err.textContent='Introduce email y contraseña';err.style.display='block';return;}
+  try{
+    const{data,error}=await _sb.auth.signInWithPassword({email,password:pass});
+    if(error)throw error;
+    currentUser=data.user;
+    const{data:perfil}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
+    if(!perfil){err.textContent='Perfil no encontrado';err.style.display='block';await _sb.auth.signOut();return;}
+    userProfile={nombre:perfil.nombre,role:perfil.role,email:perfil.email,id:perfil.id};
+    enterApp();
+  }catch(e){
+    err.textContent=e.message==='Invalid login credentials'?'Email o contraseña incorrectos':e.message;
+    err.style.display='block';
+  }
+}
+document.getElementById('login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+async function doLogout(){await _sb.auth.signOut();currentUser=null;userProfile=null;document.getElementById('app').style.display='none';document.getElementById('login-screen').style.display='flex';closeSidebar();}
+
+// ENTER APP
+async function enterApp(){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  document.getElementById('tb-user').textContent=userProfile.nombre;
+  buildNav();
+  await loadEvents();await loadPOS();await loadProducts();
+  initNFC();
+  navigate(window.location.hash.replace('#','')||'pos');
+}
+async function loadEvents(){
+  const{data}=await _sb.from('events').select('id,nombre,estado').in('estado',['publicado','confirmado','produccion']).order('fecha_inicio',{ascending:false});
+  allEvents=data||[];
+  if(allEvents.length>0){selectedEvent=allEvents[0];document.getElementById('tb-event').textContent=selectedEvent.nombre;}
+}
+async function loadPOS(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_points_of_sale').select('*').eq('event_id',selectedEvent.id).eq('active',true);allPOS=data||[];}
+async function loadProducts(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_products').select('*').eq('event_id',selectedEvent.id).eq('active',true).order('sort_order');posProducts=data||[];}
+
+// NAV
+function buildNav(){document.getElementById('s-nav').innerHTML=NAV.map(i=>i.sec?`<div class="s-sec">${i.sec}</div>`:`<div class="s-item" id="nav-${i.key}" onclick="navigate('${i.key}')"><span class="icon">${i.icon}</span>${i.label}</div>`).join('');}
+function navigate(page){
+  currentPage=page;window.location.hash=page;
+  document.querySelectorAll('.s-item').forEach(el=>el.classList.remove('active'));
+  document.getElementById('nav-'+page)?.classList.add('active');
+  document.getElementById('tb-title').textContent=PAGE_TITLES[page]||page;
+  closeSidebar();
+  const pc=document.getElementById('page-content');
+  ({pos:renderPOS,topup:renderTopup,register:renderRegister,access:renderAccess,balance:renderBalance,transactions:renderTransactions,dashboard:renderDashboard,products:renderProducts,config:renderConfig}[page]||renderPOS)(pc);
+}
+window.addEventListener('hashchange',()=>{const h=window.location.hash.replace('#','');if(h&&h!==currentPage)navigate(h);});
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').style.display='block';}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').style.display='none';}
+
+// WEB NFC
+async function initNFC(){
+  const dot=document.getElementById('nfc-status-dot'),txt=document.getElementById('nfc-status-text');
+  if('NDEFReader' in window){
+    nfcSupported=true;
+    try{
+      nfcReader=new NDEFReader();await nfcReader.scan();
+      nfcReader.onreading=(ev)=>{const uid=ev.serialNumber.replace(/:/g,'').toUpperCase();handleNFCScan(uid);};
+      nfcReader.onreadingerror=()=>{toast('Error leyendo NFC');};
+      dot.className='s-status-dot on';txt.textContent='NFC: Activo';
+    }catch(e){dot.className='s-status-dot off';txt.textContent='NFC: Permiso denegado';}
+  }else{dot.className='s-status-dot off';txt.textContent='NFC: No disponible';nfcSupported=false;}
+}
+function handleNFCScan(uid){
+  lastScannedUID=uid;
+  if(navigator.vibrate)navigator.vibrate(100);
+  if(currentPage==='pos')onPOSScan(uid);
+  else if(currentPage==='topup')onTopupScan(uid);
+  else if(currentPage==='register')onRegisterScan(uid);
+  else if(currentPage==='access')onAccessScan(uid);
+  else if(currentPage==='balance')onBalanceScan(uid);
+  else toast('UID: '+uid);
+}
+function manualUIDInput(){const uid=prompt('Introduce el UID de la pulsera:');if(uid&&uid.trim())handleNFCScan(uid.trim().toUpperCase());}
+
+// ═══ POS ═══
+function renderPOS(pc){
+  posCart={};
+  pc.innerHTML=`<div class="g2"><div><div class="card mb16"><div class="card-title">Productos</div>${posProducts.length===0?'<div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:28px;margin-bottom:8px">🏷️</div>Ve a Productos para configurar el catálogo</div>':`<div class="pos-grid" id="pos-grid">${posProducts.map(p=>`<div class="pos-item" id="pos-p-${p.id}" onclick="addToCart('${p.id}')" style="position:relative"><div class="p-name">${p.name}</div><div class="p-price">${fmt(p.price)}€</div></div>`).join('')}</div>`}</div></div><div><div class="card mb16" id="pos-cart-card"><div class="card-title">Cuenta</div><div id="pos-cart-items" style="min-height:60px"><div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Selecciona productos</div></div><div style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--border);margin-top:12px"><span style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Total</span><span class="cart-total" id="pos-cart-total">0,00€</span></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-g" style="flex:1" onclick="clearCart()">Borrar</button><button class="btn btn-p btn-lg" style="flex:2" onclick="startPOSCharge()">Cobrar</button></div></div><div class="nfc-scan" id="pos-scan-area" style="display:none"><div class="nfc-ring scanning" id="pos-nfc-ring"><span class="emoji">📡</span></div><div class="nfc-label">Acerca la pulsera</div><div class="nfc-sub" id="pos-scan-sub">Esperando pulsera NFC...</div><button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button><button class="btn btn-g" style="margin-top:8px" onclick="cancelPOSCharge()">Cancelar</button></div></div></div>`;
+}
+function addToCart(id){posCart[id]=(posCart[id]||0)+1;updateCartUI();}
+function removeFromCart(id){if(posCart[id])posCart[id]--;if(posCart[id]<=0)delete posCart[id];updateCartUI();}
+function clearCart(){posCart={};updateCartUI();document.getElementById('pos-scan-area').style.display='none';document.getElementById('pos-cart-card').style.display='block';}
+function getCartTotal(){let t=0;for(const[id,qty]of Object.entries(posCart)){const p=posProducts.find(x=>x.id===id);if(p)t+=p.price*qty;}return t;}
+function updateCartUI(){
+  const items=document.getElementById('pos-cart-items'),totalEl=document.getElementById('pos-cart-total');
+  const entries=Object.entries(posCart).filter(([,q])=>q>0);
+  if(!entries.length){items.innerHTML='<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Selecciona productos</div>';totalEl.textContent='0,00€';return;}
+  items.innerHTML=entries.map(([id,qty])=>{const p=posProducts.find(x=>x.id===id);if(!p)return'';return`<div class="cart-row"><div style="display:flex;align-items:center;gap:10px"><button class="btn btn-g" style="width:32px;height:32px;min-height:32px;font-size:16px;padding:0;border-radius:8px" onclick="removeFromCart('${id}')">−</button><span>${p.name} ×${qty}</span></div><span style="font-weight:600;color:var(--a1)">${fmt(p.price*qty)}€</span></div>`;}).join('');
+  totalEl.textContent=fmt(getCartTotal())+'€';
+  document.querySelectorAll('.pos-item').forEach(el=>el.classList.remove('in-cart'));
+  for(const id of Object.keys(posCart))document.getElementById('pos-p-'+id)?.classList.add('in-cart');
+}
+function startPOSCharge(){const t=getCartTotal();if(t<=0){toast('Añade productos primero');return;}document.getElementById('pos-cart-card').style.display='none';document.getElementById('pos-scan-area').style.display='flex';document.getElementById('pos-scan-sub').textContent=`Total: ${fmt(t)}€ — Esperando pulsera...`;}
+function cancelPOSCharge(){document.getElementById('pos-scan-area').style.display='none';document.getElementById('pos-cart-card').style.display='block';}
+async function onPOSScan(uid){
+  const scanArea=document.getElementById('pos-scan-area');if(!scanArea||scanArea.style.display==='none')return;
+  const total=getCartTotal();if(total<=0)return;
+  const ring=document.getElementById('pos-nfc-ring'),sub=document.getElementById('pos-scan-sub');
+  ring.className='nfc-ring';sub.textContent='Procesando...';
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
+  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='Pulsera no registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},2000);return;}
+  if(wb.status!=='active'){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='🚫';sub.textContent='Pulsera bloqueada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},2000);return;}
+  if(parseFloat(wb.balance)<total){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='💸';sub.textContent=`Saldo insuficiente: ${fmt(wb.balance)}€ (necesita ${fmt(total)}€)`;if(navigator.vibrate)navigator.vibrate([200,100,200]);setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},3000);return;}
+  const newBal=parseFloat(wb.balance)-total;
+  const desc=Object.entries(posCart).map(([id,qty])=>{const p=posProducts.find(x=>x.id===id);return p?p.name+' x'+qty:'';}).filter(Boolean).join(', ');
+  await _sb.from('rfid_wristbands').update({balance:newBal,total_spent:parseFloat(wb.total_spent||0)+total,last_used_at:new Date().toISOString()}).eq('id',wb.id);
+  await _sb.from('rfid_transactions').insert({wristband_id:wb.id,event_id:selectedEvent?.id,type:'purchase',amount:-total,balance_after:newBal,description:desc,point_of_sale:'POS',operator:userProfile.nombre,payment_method:'cashless'});
+  showResult('success','✅','Cobrado: '+fmt(total)+'€','Saldo restante: '+fmt(newBal)+'€ · '+(wb.holder_name||''));
+  posCart={};setTimeout(()=>{hideResult();cancelPOSCharge();updateCartUI();},2500);
+}
+
+// ═══ TOPUP ═══
+let topupAmount=0,topupPayMethod='cash';
+function renderTopup(pc){
+  topupAmount=0;
+  pc.innerHTML=`<div class="g2"><div><div class="card mb16"><div class="card-title">Importe a recargar</div><div class="topup-grid"><div class="topup-btn" onclick="selectTopup(5,this)"><div class="amount">5€</div></div><div class="topup-btn" onclick="selectTopup(10,this)"><div class="amount">10€</div></div><div class="topup-btn" onclick="selectTopup(20,this)"><div class="amount">20€</div></div><div class="topup-btn" onclick="selectTopup(30,this)"><div class="amount">30€</div></div><div class="topup-btn" onclick="selectTopup(50,this)"><div class="amount">50€</div></div><div class="topup-btn" onclick="selectTopup(100,this)"><div class="amount">100€</div></div></div><label class="form-lbl">O cantidad personalizada</label><input class="form-input" id="topup-custom" type="number" min="1" step="0.5" placeholder="Ej: 15" oninput="customTopup(this.value)" style="margin-bottom:0"/></div><div class="card"><div class="card-title">Método de pago</div><div style="display:flex;gap:8px"><button class="btn btn-g" style="flex:1" id="pay-cash" onclick="selectPayMethod('cash')">💵 Efectivo</button><button class="btn btn-g" style="flex:1" id="pay-card" onclick="selectPayMethod('card')">💳 Tarjeta</button></div></div></div><div><div class="nfc-scan"><div class="nfc-ring scanning" id="topup-nfc-ring"><span class="emoji">📡</span></div><div class="nfc-label" id="topup-label">Selecciona importe</div><div class="nfc-sub" id="topup-sub">Elige cantidad y acerca la pulsera</div><button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button></div></div></div>`;
+}
+function selectTopup(a,el){topupAmount=a;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));el.classList.add('selected');document.getElementById('topup-custom').value='';updateTopupUI();}
+function customTopup(v){topupAmount=parseFloat(v)||0;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));updateTopupUI();}
+function selectPayMethod(m){topupPayMethod=m;document.getElementById('pay-cash').className='btn '+(m==='cash'?'btn-p':'btn-g');document.getElementById('pay-card').className='btn '+(m==='card'?'btn-p':'btn-g');}
+function updateTopupUI(){const l=document.getElementById('topup-label'),s=document.getElementById('topup-sub');if(topupAmount>0){l.textContent='Recargar '+fmt(topupAmount)+'€';s.textContent='Acerca la pulsera al lector NFC';document.getElementById('topup-nfc-ring').className='nfc-ring scanning';}else{l.textContent='Selecciona importe';s.textContent='Elige cantidad y acerca la pulsera';}}
+async function onTopupScan(uid){
+  if(topupAmount<=0){toast('Selecciona un importe primero');return;}
+  const ring=document.getElementById('topup-nfc-ring'),sub=document.getElementById('topup-sub');
+  ring.className='nfc-ring';sub.textContent='Procesando...';
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
+  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='Pulsera no registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';updateTopupUI();},2000);return;}
+  const newBal=parseFloat(wb.balance)+topupAmount;
+  await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(wb.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',wb.id);
+  await _sb.from('rfid_transactions').insert({wristband_id:wb.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'Recarga '+(topupPayMethod==='cash'?'efectivo':'tarjeta'),point_of_sale:'Taquilla',operator:userProfile.nombre,payment_method:topupPayMethod});
+  showResult('success','💰','+'+fmt(topupAmount)+'€ recargados','Nuevo saldo: '+fmt(newBal)+'€ · '+(wb.holder_name||uid));
+  setTimeout(()=>{hideResult();topupAmount=0;renderTopup(document.getElementById('page-content'));},2500);
+}
+
+// ═══ REGISTER ═══
+let registerUID=null;
+function renderRegister(pc){
+  registerUID=null;
+  pc.innerHTML=`<div class="g2"><div><div class="nfc-scan"><div class="nfc-ring scanning" id="reg-nfc-ring"><span class="emoji">📡</span></div><div class="nfc-label">Acerca la pulsera nueva</div><div class="nfc-sub" id="reg-sub">Esperando pulsera NFC...</div><button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button></div></div><div><div class="card" id="reg-form-card" style="opacity:.4;pointer-events:none"><div class="card-title">Datos del asistente</div><div style="padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:13px"><span style="color:var(--muted)">UID:</span> <strong id="reg-uid-display" style="color:var(--a1);font-family:monospace">—</strong></div><label class="form-lbl">Nombre</label><input class="form-input" id="reg-nombre" placeholder="Nombre del asistente"/><label class="form-lbl">Email</label><input class="form-input" id="reg-email" type="email" placeholder="email@ejemplo.com"/><label class="form-lbl">Teléfono</label><input class="form-input" id="reg-phone" type="tel" placeholder="600 000 000"/><label class="form-lbl">PIN (para recarga móvil)</label><input class="form-input" id="reg-pin" type="number" placeholder="4 dígitos" maxlength="4" style="margin-bottom:0"/><button class="btn btn-p btn-full btn-lg" style="margin-top:16px" onclick="doRegister()">Registrar pulsera</button></div></div></div>`;
+}
+function onRegisterScan(uid){
+  registerUID=uid;
+  document.getElementById('reg-nfc-ring').className='nfc-ring success';
+  document.getElementById('reg-nfc-ring').querySelector('.emoji').textContent='✅';
+  document.getElementById('reg-sub').textContent='UID: '+uid;
+  document.getElementById('reg-uid-display').textContent=uid;
+  const f=document.getElementById('reg-form-card');f.style.opacity='1';f.style.pointerEvents='auto';
+  document.getElementById('reg-nombre').focus();
+}
+async function doRegister(){
+  if(!registerUID){toast('Escanea una pulsera primero');return;}
+  const{data:existing}=await _sb.from('rfid_wristbands').select('id').eq('uid',registerUID).single();
+  if(existing){toast('⚠️ Esta pulsera ya está registrada');return;}
+  const{error}=await _sb.from('rfid_wristbands').insert({uid:registerUID,event_id:selectedEvent?.id,holder_name:document.getElementById('reg-nombre').value.trim()||null,holder_email:document.getElementById('reg-email').value.trim()||null,holder_phone:document.getElementById('reg-phone').value.trim()||null,pin_hash:document.getElementById('reg-pin').value.trim()||null,balance:0,total_loaded:0,total_spent:0,status:'active',registered_by:userProfile.nombre});
+  if(error){toast('Error: '+error.message);return;}
+  showResult('success','🎉','Pulsera registrada',(document.getElementById('reg-nombre').value||registerUID)+' — Saldo: 0,00€');
+  setTimeout(()=>{hideResult();renderRegister(document.getElementById('page-content'));},2000);
+}
+
+// ═══ ACCESS ═══
+function renderAccess(pc){pc.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh"><div class="nfc-ring scanning" style="width:200px;height:200px"><span class="emoji" style="font-size:64px">🚪</span></div><div class="nfc-label" style="margin-top:20px;font-size:22px">Control de Acceso</div><div class="nfc-sub" style="font-size:15px">Acerca la pulsera al lector</div><button class="btn btn-g" style="margin-top:20px" onclick="manualUIDInput()">UID manual</button></div>`;}
+async function onAccessScan(uid){
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
+  if(!wb||wb.status!=='active'){showAccessResult(false,wb?'BLOQUEADA':'NO REGISTRADA');return;}
+  const{data:lastLog}=await _sb.from('rfid_access_log').select('direction').eq('wristband_id',wb.id).order('created_at',{ascending:false}).limit(1).single();
+  const dir=(!lastLog||lastLog.direction==='out')?'in':'out';
+  await _sb.from('rfid_access_log').insert({wristband_id:wb.id,event_id:selectedEvent?.id,direction:dir,gate:'Principal',operator:userProfile.nombre});
+  showAccessResult(true,dir==='in'?'ENTRADA · '+(wb.holder_name||uid):'SALIDA · '+(wb.holder_name||uid));
+}
+function showAccessResult(ok,text){
+  const d=document.createElement('div');d.className='access-full '+(ok?'granted':'denied');
+  d.innerHTML=`<div style="font-size:100px">${ok?'✅':'❌'}</div><div class="access-text" style="color:${ok?'var(--success)':'var(--danger)'}">${text}</div>`;
+  d.onclick=()=>d.remove();document.body.appendChild(d);
+  if(navigator.vibrate)navigator.vibrate(ok?100:[200,100,200]);
+  setTimeout(()=>d.remove(),2500);
+}
+
+// ═══ BALANCE ═══
+function renderBalance(pc){pc.innerHTML=`<div style="max-width:500px;margin:0 auto"><div class="nfc-scan"><div class="nfc-ring scanning" id="bal-nfc-ring"><span class="emoji">💰</span></div><div class="nfc-label">Consultar saldo</div><div class="nfc-sub">Acerca la pulsera</div><button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button></div><div id="bal-result" style="display:none"></div></div>`;}
+async function onBalanceScan(uid){
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
+  if(!wb){toast('Pulsera no registrada');return;}
+  const{data:txs}=await _sb.from('rfid_transactions').select('*').eq('wristband_id',wb.id).order('created_at',{ascending:false}).limit(10);
+  const r=document.getElementById('bal-result');r.style.display='block';
+  r.innerHTML=`<div class="card mb16" style="text-align:center;padding:30px"><div style="font-size:13px;color:var(--muted);margin-bottom:4px">${wb.holder_name||'Sin nombre'}</div><div class="balance-big">${fmt(wb.balance)}€</div><div class="balance-label">Saldo disponible</div><div style="display:flex;justify-content:center;gap:16px;margin-top:16px"><div><span style="font-size:11px;color:var(--muted)">Recargado</span><div style="font-family:Syne;font-weight:700;color:var(--success)">${fmt(wb.total_loaded)}€</div></div><div><span style="font-size:11px;color:var(--muted)">Gastado</span><div style="font-family:Syne;font-weight:700;color:var(--a2)">${fmt(wb.total_spent)}€</div></div></div></div><div class="card"><div class="card-title">Últimos movimientos</div>${(!txs||!txs.length)?'<div style="color:var(--muted);font-size:13px;text-align:center;padding:12px">Sin movimientos</div>':`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th></tr></thead><tbody>${txs.map(t=>`<tr><td style="font-size:12px;color:var(--muted)">${fmtDate(t.created_at)}</td><td><span class="badge ${t.type==='topup'?'b-green':'b-red'}">${t.type==='topup'?'Recarga':'Compra'}</span></td><td style="font-size:13px">${t.description||'—'}</td><td style="font-weight:600;color:${t.amount>=0?'var(--success)':'var(--danger)'}">${t.amount>=0?'+':''}${fmt(t.amount)}€</td></tr>`).join('')}</tbody></table></div>`}</div>`;
+  document.getElementById('bal-nfc-ring').className='nfc-ring success';
+}
+
+// ═══ TRANSACTIONS ═══
+async function renderTransactions(pc){
+  pc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Cargando...</div>';
+  const{data}=await _sb.from('rfid_transactions').select('*, rfid_wristbands(holder_name,uid)').order('created_at',{ascending:false}).limit(100);
+  const txs=data||[];
+  pc.innerHTML=`<div class="card"><div class="card-title">Últimas transacciones (${txs.length})</div>${!txs.length?'<div style="color:var(--muted);text-align:center;padding:20px">Sin transacciones</div>':`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Pulsera</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Saldo</th><th>Operador</th></tr></thead><tbody>${txs.map(t=>`<tr><td style="font-size:12px;color:var(--muted);white-space:nowrap">${fmtDate(t.created_at)}</td><td style="font-size:12px">${t.rfid_wristbands?.holder_name||t.rfid_wristbands?.uid||'—'}</td><td><span class="badge ${t.type==='topup'?'b-green':'b-red'}">${t.type}</span></td><td style="font-size:13px">${t.description||'—'}</td><td style="font-weight:600;color:${t.amount>=0?'var(--success)':'var(--danger)'}">${t.amount>=0?'+':''}${fmt(t.amount)}€</td><td style="font-size:12px;color:var(--muted)">${fmt(t.balance_after)}€</td><td style="font-size:12px;color:var(--muted)">${t.operator||'—'}</td></tr>`).join('')}</tbody></table></div>`}</div>`;
+}
+
+// ═══ DASHBOARD ═══
+async function renderDashboard(pc){
+  pc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Cargando...</div>';
+  const eid=selectedEvent?.id;
+  const[wR,tR,aR]=await Promise.all([
+    _sb.from('rfid_wristbands').select('balance,status').eq('event_id',eid),
+    _sb.from('rfid_transactions').select('type,amount,created_at').eq('event_id',eid),
+    _sb.from('rfid_access_log').select('direction').eq('event_id',eid)
+  ]);
+  const wbs=wR.data||[],txs=tR.data||[],accs=aR.data||[];
+  const totalBal=wbs.reduce((s,w)=>s+parseFloat(w.balance||0),0);
+  const activeWB=wbs.filter(w=>w.status==='active').length;
+  const totalTop=txs.filter(t=>t.type==='topup').reduce((s,t)=>s+parseFloat(t.amount),0);
+  const totalPur=txs.filter(t=>t.type==='purchase').reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+  const inside=accs.filter(a=>a.direction==='in').length-accs.filter(a=>a.direction==='out').length;
+  pc.innerHTML=`<div class="g3 mb24"><div class="card" style="text-align:center"><div class="stat-lbl">Saldo en circulación</div><div class="stat-val" style="color:var(--a1)">${fmt(totalBal)}€</div></div><div class="card" style="text-align:center"><div class="stat-lbl">Total recargado</div><div class="stat-val" style="color:var(--success)">${fmt(totalTop)}€</div></div><div class="card" style="text-align:center"><div class="stat-lbl">Total consumido</div><div class="stat-val" style="color:var(--a2)">${fmt(totalPur)}€</div></div></div><div class="g3 mb24"><div class="card" style="text-align:center"><div class="stat-lbl">Pulseras activas</div><div class="stat-val" style="color:var(--a3)">${activeWB}</div></div><div class="card" style="text-align:center"><div class="stat-lbl">Transacciones</div><div class="stat-val">${txs.length}</div></div><div class="card" style="text-align:center"><div class="stat-lbl">Aforo actual</div><div class="stat-val" style="color:var(--warn)">${Math.max(0,inside)}</div></div></div>`;
+}
+
+// ═══ PRODUCTS ═══
+async function renderProducts(pc){
+  await loadProducts();
+  pc.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px"><div style="font-family:Syne;font-weight:700;font-size:20px">${posProducts.length} productos</div><button class="btn btn-p" onclick="addProduct()">+ Añadir producto</button></div>${!posProducts.length?'<div class="card" style="text-align:center;padding:40px"><div style="font-size:36px;margin-bottom:8px">🏷️</div><div style="color:var(--muted)">Sin productos. Añade el primero.</div></div>':`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>Precio</th><th>Categoría</th><th></th></tr></thead><tbody>${posProducts.map(p=>`<tr><td style="font-weight:500">${p.name}</td><td style="color:var(--a1);font-weight:600">${fmt(p.price)}€</td><td style="color:var(--muted)">${p.category||'—'}</td><td><button class="btn btn-g" style="padding:6px 10px;font-size:12px" onclick="deleteProduct('${p.id}')">✕</button></td></tr>`).join('')}</tbody></table></div></div>`}`;
+}
+function addProduct(){const n=prompt('Nombre del producto:');if(!n)return;const p=parseFloat(prompt('Precio en €:'));if(!p||p<=0)return;const c=prompt('Categoría (Bebidas, Comida, Merch):')||'General';_sb.from('rfid_products').insert({event_id:selectedEvent?.id,name:n,price:p,category:c,active:true,sort_order:posProducts.length}).then(({error})=>{if(error)toast('Error: '+error.message);else{toast('"'+n+'" añadido ✓');renderProducts(document.getElementById('page-content'));}});}
+async function deleteProduct(id){await _sb.from('rfid_products').delete().eq('id',id);toast('Eliminado');renderProducts(document.getElementById('page-content'));}
+
+// ═══ CONFIG ═══
+function renderConfig(pc){
+  pc.innerHTML=`<div class="g2"><div class="card"><div class="card-title">Evento activo</div><select class="form-select" onchange="changeEvent(this.value)">${allEvents.map(e=>`<option value="${e.id}" ${selectedEvent?.id===e.id?'selected':''}>${e.nombre}</option>`).join('')}</select><div style="font-size:12px;color:var(--muted)">Productos, pulseras y transacciones se filtran por evento.</div></div><div class="card"><div class="card-title">NFC</div><div class="s-status" style="margin-bottom:12px"><span class="s-status-dot ${nfcSupported?'on':'off'}"></span><span>${nfcSupported?'Web NFC activo':'Web NFC no disponible — usa UID manual'}</span></div>${!nfcSupported?'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--warn)">⚠️ Web NFC requiere Chrome en Android.</div>':''}<button class="btn btn-g btn-full" style="margin-top:12px" onclick="initNFC()">Reintentar NFC</button></div></div>`;
+}
+function changeEvent(id){selectedEvent=allEvents.find(e=>e.id===id);document.getElementById('tb-event').textContent=selectedEvent?.nombre||'Sin evento';loadPOS();loadProducts();toast('Evento: '+selectedEvent?.nombre);}
+
+// RESULT OVERLAY
+function showResult(type,emoji,title,sub){const d=document.createElement('div');d.id='result-overlay';d.className='result-overlay '+type;d.innerHTML=`<div class="result-box ${type}"><div class="result-emoji">${emoji}</div><div class="result-title">${title}</div><div class="result-sub">${sub||''}</div></div>`;d.onclick=()=>d.remove();document.body.appendChild(d);if(navigator.vibrate)navigator.vibrate(type==='success'?100:[200,100,200]);}
+function hideResult(){document.getElementById('result-overlay')?.remove();}
+
+// AUTO-LOGIN
+(async function(){
+  const{data:{session}}=await _sb.auth.getSession();
+  if(session?.user){
+    currentUser=session.user;
+    const{data:p}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
+    if(p){userProfile={nombre:p.nombre,role:p.role,email:p.email,id:p.id};enterApp();}
+  }
+})();
+</script>
+</body>
+</html>
