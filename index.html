@@ -356,8 +356,8 @@ function startSumUpTopup(){
   const btn=document.getElementById('topup-sumup-btn');
   btn.disabled=true;btn.textContent='Creando pago...';
 
-  // Llamar al backend de inout-check para crear el checkout de SumUp
-  fetch('https://inout-check.vercel.app/api/rfid/topup',{
+  // Llamar al backend de inout-api para crear el checkout de SumUp
+  fetch('https://inout-api.vercel.app/api/rfid/topup',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
@@ -397,7 +397,7 @@ function checkTopupPayment(){
   const statusEl=document.getElementById('topup-verify-status');
   if(statusEl)statusEl.innerHTML='🔄 Verificando con SumUp...';
 
-  fetch(`https://inout-check.vercel.app/api/rfid/verify-topup?wristband=${wbId}&amount=${amount}&ref=${ref}&sumup_id=${sumupId}`)
+  fetch(`https://inout-api.vercel.app/api/rfid/verify-topup?wristband=${wbId}&amount=${amount}&ref=${ref}&sumup_id=${sumupId}`)
   .then(r=>r.json())
   .then(data=>{
     if(data.status==='completed'||data.status==='already_completed'){
