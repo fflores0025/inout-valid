@@ -377,7 +377,22 @@ function startSumUpTopup(){
     sessionStorage.setItem('topup_amount',String(topupAmount));
     sessionStorage.setItem('topup_ref',data.reference);
     // Redirigir a la pasarela de pago de SumUp
-    window.open(data.checkout_url,'_blank');
+    // Detectar si estamos en Android → usar datáfono SumUp Solo
+const isAndroid = /Android/i.test(navigator.userAgent);
+if(isAndroid){
+  const sumupDeepLink = 'sumupmerchant://pay/1.0'
+    + '?affiliate-key=sup_afk_Yw5nEDC5oRf34ycz09JFqPkR1DLQR5MH'
+    + '&app-id=com.inoutmedia.valid'
+    + '&total=' + topupAmount.toFixed(2)
+    + '&currency=EUR'
+    + '&title=Recarga+pulsera+' + encodeURIComponent(topupWristband.holder_name||topupWristband.uid)
+    + '&foreign-tx-id=' + data.reference
+    + '&skip-screen-success=true'
+    + '&callback=' + encodeURIComponent('https://inout-valid.vercel.app/#topup');
+  window.location.href = sumupDeepLink;
+} else {
+  window.open(data.checkout_url,'_blank');
+}
     // Mostrar pantalla de espera
     document.getElementById('page-content').innerHTML=`<div style="max-width:500px;margin:40px auto;text-align:center"><div class="card"><div style="font-size:48px;margin-bottom:16px">💳</div><div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">Pago en proceso</div><div style="font-size:15px;color:var(--muted);margin-bottom:8px">${topupWristband.holder_name||topupWristband.uid}</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">${fmt(topupAmount)}€</div><div style="font-size:13px;color:var(--muted);margin-bottom:24px">Se ha abierto la pasarela de pago de SumUp</div><div id="topup-verify-status" style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;font-size:14px;color:var(--warn)">⏳ Esperando confirmación de pago...</div><div style="display:flex;gap:10px;flex-direction:column"><button class="btn btn-p btn-full btn-lg" onclick="checkTopupPayment()">🔄 Verificar pago</button><button class="btn btn-danger btn-full" onclick="cancelSumUpPayment()">❌ Cancelar</button></div></div></div>`;
     // Auto-verificar cada 5 segundos
