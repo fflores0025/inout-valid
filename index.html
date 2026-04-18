@@ -452,9 +452,11 @@ function cancelSumUpPayment(){
 }
 
 function confirmManualTopup(){
-  if(!userProfile||userProfile.role!=='admin'){toast('⛔ Solo administradores pueden hacer recargas manuales');return;}
   if(!topupWristband){toast('Escanea una pulsera primero');return;}
   if(topupAmount<=0){toast('Selecciona un importe');return;}
+  const pin=prompt('🔒 Introduce el PIN de administrador:');
+  if(!pin)return;
+  if(pin!=='0607'){toast('⛔ PIN incorrecto');return;}
   if(!confirm('⚠️ RECARGA MANUAL sin cobro SumUp.\n\nEsto añade saldo sin verificar pago.\nSolo usar en casos excepcionales.\n\n¿Confirmar recarga de '+fmt(topupAmount)+'€?'))return;
   const ref='MANUAL-'+userProfile.nombre+'-'+Date.now();
   (async()=>{
