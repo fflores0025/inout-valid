@@ -329,11 +329,15 @@ function selectTopup(a,el){topupAmount=a;document.querySelectorAll('.topup-btn')
 function customTopup(v){topupAmount=parseFloat(v)||0;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));updateTopupUI();}
 
 function updateTopupUI(){
-  document.getElementById('topup-amount-display').textContent=topupAmount>0?fmt(topupAmount)+'€':'0,00€';
-  document.getElementById('topup-holder-label').textContent=topupWristband?(topupWristband.holder_name||topupWristband.uid):'Escanea la pulsera primero';
-  const btn=document.getElementById('topup-sumup-btn');
-  if(topupAmount>0&&topupWristband){btn.disabled=false;btn.style.opacity='1';}
-  else{btn.disabled=true;btn.style.opacity='.5';}
+  const fee = topupAmount > 0 ? Math.round(topupAmount * 3.5) / 100 : 0;
+  const totalPay = topupAmount + fee;
+  document.getElementById('topup-amount-display').textContent = topupAmount > 0 ? fmt(topupAmount) + '€' : '0,00€';
+  document.getElementById('topup-holder-label').textContent = topupWristband
+    ? (topupWristband.holder_name || topupWristband.uid) + (fee > 0 ? ' · Pago total: ' + fmt(totalPay) + '€ (incl. ' + fmt(fee) + '€ comisión)' : '')
+    : 'Escanea la pulsera primero';
+  const btn = document.getElementById('topup-sumup-btn');
+  if(topupAmount > 0 && topupWristband){btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Cobrar ' + fmt(totalPay) + '€ con SumUp';}
+  else{btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = 'Cobrar con SumUp';}
 }
 
 async function onTopupScan(uid){
