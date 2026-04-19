@@ -819,41 +819,62 @@ async function loadProducts(){
 // Para la pantalla de gestión: todas las instancias del evento (activas e inactivas)
 async function loadAllProductsForEvent(){
   if(!selectedEvent) return [];
-  const{data}=await _sb.from('rfid_products')
-    .select('*, rfid_products_catalog(name,category)')
-    .eq('event_id',selectedEvent.id)
-    .order('sort_order');
-  return (data||[]).map(p=>({
-    ...p,
-    name:     p.rfid_products_catalog?.name     || p.name     || '—',
-    category: p.rfid_products_catalog?.category || p.category || '—',
-  }));
+  // Intentar con JOIN al catálogo; si falla (tabla no existe) hacer query simple
+  try {
+    const{data, error}=await _sb.from('rfid_products')
+      .select('*, rfid_products_catalog(name,category)')
+      .eq('event_id',selectedEvent.id)
+      .order('sort_order');
+    if(error) throw error;
+    return (data||[]).map(p=>({
+      ...p,
+      name:     p.rfid_products_catalog?.name     || p.name     || '—',
+      category: p.rfid_products_catalog?.category || p.category || '—',
+      stock:    p.stock || 0,
+      active:   p.active !== false, // default true si null
+    }));
+  } catch(e) {
+    // Fallback: query simple sin JOIN (catálogo no existe aún)
+    const{data}=await _sb.from('rfid_products')
+      .select('*')
+      .eq('event_id',selectedEvent.id)
+      .order('sort_order,name');
+    return (data||[]).map(p=>({
+      ...p,
+      stock:  p.stock  || 0,
+      active: p.active !== false,
+    }));
+  }
 }
 
 // Asegura que todos los productos del catálogo tienen una instancia en el evento
-// Se llama al entrar en la pantalla de productos
 async function syncCatalogToEvent(eventId){
   if(!eventId) return;
-  const[{data:catalog},{data:existing}]=await Promise.all([
-    _sb.from('rfid_products_catalog').select('id,name,category,default_price').eq('active',true),
-    _sb.from('rfid_products').select('catalog_id').eq('event_id',eventId)
-  ]);
-  const existingIds=new Set((existing||[]).map(p=>p.catalog_id).filter(Boolean));
-  const missing=(catalog||[]).filter(c=>!existingIds.has(c.id));
-  if(!missing.length) return;
-  // Insertar los que faltan como inactivos con precio por defecto
-  await _sb.from('rfid_products').insert(
-    missing.map((c,i)=>({
-      event_id:   eventId,
-      catalog_id: c.id,
-      name:       c.name,
-      category:   c.category,
-      price:      c.default_price||0,
-      stock:      0,
-      active:     false,   // siempre inactivo por defecto
-      sort_order: i,
-    }))
-  );
+  try {
+    const[{data:catalog, error:catErr},{data:existing}]=await Promise.all([
+      _sb.from('rfid_products_catalog').select('id,name,category,default_price').eq('active',true),
+      _sb.from('rfid_products').select('catalog_id').eq('event_id',eventId)
+    ]);
+    if(catErr) return; // tabla no existe aún — ignorar silenciosamente
+    const existingIds=new Set((existing||[]).map(p=>p.catalog_id).filter(Boolean));
+    const missing=(catalog||[]).filter(c=>!existingIds.has(c.id));
+    if(!missing.length) return;
+    await _sb.from('rfid_products').insert(
+      missing.map((c,i)=>({
+        event_id:   eventId,
+        catalog_id: c.id,
+        name:       c.name,
+        category:   c.category,
+        price:      c.default_price||0,
+        stock:      0,
+        active:     false,
+        sort_order: i,
+      }))
+    );
+  } catch(e) {
+    // Tabla catálogo no existe — no hacer nada, funcionar con rfid_products directo
+    console.log('syncCatalogToEvent: catálogo no disponible, usando rfid_products directo');
+  }
 }
 
 // ════════════════════════════════════════
@@ -1400,28 +1421,7 @@ async function renderDashboard(pc){
 // ════════════════════════════════════════
 //  PRODUCTS — sin prompt nativo
 // ════════════════════════════════════════
-async function renderProducts(pc){
-  await loadProducts();
-  pc.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
-    <div style="font-family:Syne;font-weight:700;font-size:20px">${posProducts.length} productos</div>
-    <button class="btn btn-p" onclick="modalAddProduct()">+ Añadir producto</button>
-  </div>
-  ${!posProducts.length
-    ?`<div class="card" style="text-align:center;padding:40px">
-        <div style="font-size:48px;margin-bottom:12px">🏷️</div>
-        <div style="color:var(--muted);margin-bottom:16px">Sin productos. Añade el primero.</div>
-        <button class="btn btn-p" onclick="modalAddProduct()">+ Añadir primer producto</button>
-      </div>`
-    :`<div class="card"><div class="tbl-wrap"><table>
-        <thead><tr><th>Nombre</th><th>Precio</th><th>Categoría</th><th></th></tr></thead>
-        <tbody>${posProducts.map(p=>`<tr>
-          <td style="font-weight:500">${p.name}</td>
-          <td style="color:var(--a1);font-weight:600">${fmt(p.price)}€</td>
-          <td style="color:var(--muted)">${p.category||'—'}</td>
-          <td><button class="btn btn-danger" style="padding:6px 12px;font-size:12px;min-height:36px" onclick="confirmDeleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">✕ Eliminar</button></td>
-        </tr>`).join('')}
-        </tbody></table></div></div>`}`;
-}
+
 
 function confirmDeleteProduct(id, name){
   // Modal de confirmación en vez de confirm() nativo
