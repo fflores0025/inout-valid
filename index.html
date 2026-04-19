@@ -251,29 +251,33 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
   if(e.target === document.getElementById('modal-overlay')) closeModal();
 });
 
-// Modal de formulario para añadir producto
+// Modal de formulario para añadir producto al catálogo global
 function modalAddProduct(){
   const categories = ['Bebidas','Comida','Merch','General','Otros'];
   document.getElementById('modal-box').innerHTML=`
     <div class="modal-title">🏷️ Nuevo producto</div>
-    <div class="modal-sub">Añadir producto al catálogo del evento</div>
+    <div class="modal-sub">Se añadirá al catálogo de <strong>todos los eventos</strong>. Podrás activarlo o desactivarlo por evento.</div>
     <div id="modal-err" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
     <label class="form-lbl">Nombre del producto</label>
     <input class="form-input" id="mp-nombre" placeholder="Ej: Cocacola, Cerveza, Camiseta…" autocomplete="off"/>
-    <label class="form-lbl">Precio (€)</label>
+    <label class="form-lbl">Precio base (€)</label>
     <input class="form-input" id="mp-precio" type="number" min="0.01" step="0.01" placeholder="3.50"/>
     <label class="form-lbl">Categoría</label>
     <select class="form-select" id="mp-cat">
       ${categories.map(c=>`<option value="${c}">${c}</option>`).join('')}
     </select>
-    <div style="display:flex;gap:10px;margin-top:4px">
+    <div style="padding:10px 14px;background:rgba(200,255,0,.06);border:1px solid rgba(200,255,0,.15);border-radius:8px;font-size:12px;color:var(--muted);margin-bottom:14px">
+      💡 El producto se creará en todos los eventos activos. Activo por defecto.
+    </div>
+    <div style="display:flex;gap:10px">
       <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-p" style="flex:2" onclick="submitAddProduct()">Añadir producto</button>
+      <button class="btn btn-p" style="flex:2" onclick="submitAddProduct()">Añadir a todos los eventos</button>
     </div>`;
   document.getElementById('modal-overlay').classList.add('show');
   setTimeout(()=>document.getElementById('mp-nombre')?.focus(), 80);
-  // Enter en precio → submit
-  document.getElementById('mp-precio')?.addEventListener('keydown', e => { if(e.key==='Enter') submitAddProduct(); });
+  setTimeout(()=>{
+    document.getElementById('mp-precio')?.addEventListener('keydown', e => { if(e.key==='Enter') submitAddProduct(); });
+  }, 100);
 }
 
 async function submitAddProduct(){
@@ -284,14 +288,31 @@ async function submitAddProduct(){
   if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
   if(!precio || precio <= 0){ err.textContent='Introduce un precio válido'; err.style.display='block'; return; }
   const btn = document.querySelector('#modal-box .btn-p');
-  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
-  const{error}=await _sb.from('rfid_products').insert({
-    event_id: selectedEvent?.id, name: nombre, price: precio,
-    category: cat, active: true, sort_order: posProducts.length
-  });
-  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Añadir producto';} return; }
+  if(btn){ btn.disabled=true; btn.textContent='Guardando en todos los eventos…'; }
+
+  // 1. Obtener todos los eventos activos
+  const{data:eventos} = await _sb.from('events')
+    .select('id')
+    .in('estado',['publicado','confirmado','produccion','borrador']);
+  const eventosIds = (eventos||[]).map(e=>e.id);
+  if(!eventosIds.length){ err.textContent='No hay eventos disponibles'; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Añadir a todos los eventos';} return; }
+
+  // 2. Insertar en cada evento
+  const rows = eventosIds.map((eid,i)=>({
+    event_id:   eid,
+    name:       nombre,
+    price:      precio,
+    category:   cat,
+    active:     true,
+    sort_order: i,
+    catalog_key: nombre.toLowerCase().replace(/[^a-z0-9]/g,'_'), // clave para agrupar
+  }));
+
+  const{error} = await _sb.from('rfid_products').insert(rows);
+  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Añadir a todos los eventos';} return; }
+
   closeModal();
-  toast(`"${nombre}" añadido ✓`);
+  toast(`"${nombre}" añadido a ${eventosIds.length} evento(s) ✓`);
   await loadProducts();
   renderProducts(document.getElementById('page-content'));
 }
@@ -443,619 +464,367 @@ async function loadEvents(){
   if(allEvents.length>0){selectedEvent=allEvents[0];document.getElementById('tb-event').textContent=selectedEvent.nombre;}
 }
 async function loadPOS(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_points_of_sale').select('*').eq('event_id',selectedEvent.id).eq('active',true);allPOS=data||[];}
-async function loadProducts(){if(!selectedEvent)return;const{data}=await _sb.from('rfid_products').select('*').eq('event_id',selectedEvent.id).eq('active',true).order('sort_order');posProducts=data||[];}
-
-// ════════════════════════════════════════
-//  NAV
-// ════════════════════════════════════════
-function buildNav(){
-  document.getElementById('s-nav').innerHTML=NAV.map(i=>
-    i.sec ? `<div class="s-sec">${i.sec}</div>`
-          : `<div class="s-item" id="nav-${i.key}" onclick="navigate('${i.key}')"><span class="icon">${i.icon}</span>${i.label}</div>`
-  ).join('');
+// ── CATÁLOGO GLOBAL: carga productos del catálogo maestro ─────────────────
+async function loadCatalog(){
+  const{data}=await _sb.from('rfid_products_catalog')
+    .select('*').eq('active',true).order('category').order('name');
+  return data||[];
 }
 
-function navigate(page){
-  currentPage=page; window.location.hash=page;
-  document.querySelectorAll('.s-item').forEach(el=>el.classList.remove('active'));
-  document.getElementById('nav-'+page)?.classList.add('active');
-  document.getElementById('tb-title').textContent=PAGE_TITLES[page]||page;
-  closeSidebar();
-  const pc=document.getElementById('page-content');
-  ({
-    pos:renderPOS, topup:renderTopup, register:renderRegister,
-    access:renderAccess, balance:renderBalance, transactions:renderTransactions,
-    dashboard:renderDashboard, products:renderProducts, config:renderConfig
-  }[page]||renderPOS)(pc);
-}
-window.addEventListener('hashchange',()=>{const h=window.location.hash.replace('#','');if(h&&h!==currentPage)navigate(h);});
-function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').style.display='block';}
-function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').style.display='none';}
-
-// ════════════════════════════════════════
-//  NFC
-// ════════════════════════════════════════
-async function initNFC(){
-  const dot=document.getElementById('nfc-status-dot');
-  const txt=document.getElementById('nfc-status-text');
-  if(!('NDEFReader' in window)){
-    nfcSupported=false; dot.className='s-status-dot off'; txt.textContent='NFC: No disponible'; return;
-  }
-  nfcSupported=true;
-  try{
-    nfcReader=new NDEFReader();
-    await nfcReader.scan();
-    nfcReader.onreading      = ev => handleNFCScan(ev.serialNumber.replace(/:/g,'').toUpperCase());
-    nfcReader.onreadingerror = ()  => toast('Error leyendo NFC');
-    dot.className='s-status-dot on'; txt.textContent='NFC: Activo';
-  }catch(e){
-    dot.className='s-status-dot off'; txt.textContent='NFC: Permiso denegado'; nfcSupported=false;
-  }
+// Para el POS: solo instancias activas del evento actual
+async function loadProducts(){
+  if(!selectedEvent) return;
+  const{data}=await _sb.from('rfid_products')
+    .select('*')
+    .eq('event_id',selectedEvent.id)
+    .eq('active',true)
+    .order('sort_order');
+  posProducts=data||[];
 }
 
-function handleNFCScan(uid){
-  if(isDuplicateScan(uid)) return;
-  lastScannedUID=uid;
-  if(navigator.vibrate) navigator.vibrate(100);
-  if(currentPage==='pos')          onPOSScan(uid);
-  else if(currentPage==='topup')   onTopupScan(uid);
-  else if(currentPage==='register')onRegisterScan(uid);
-  else if(currentPage==='access')  onAccessScan(uid);
-  else if(currentPage==='balance') onBalanceScan(uid);
-  else toast('UID: '+uid);
+// Para la pantalla de gestión: todas las instancias del evento (activas e inactivas)
+async function loadAllProductsForEvent(){
+  if(!selectedEvent) return [];
+  const{data}=await _sb.from('rfid_products')
+    .select('*, rfid_products_catalog(name,category)')
+    .eq('event_id',selectedEvent.id)
+    .order('sort_order');
+  return (data||[]).map(p=>({
+    ...p,
+    name:     p.rfid_products_catalog?.name     || p.name     || '—',
+    category: p.rfid_products_catalog?.category || p.category || '—',
+  }));
 }
 
-// ── UID manual — ahora usa modal integrado ──
-function manualUIDInput(){ modalManualUID(); }
-
-// ════════════════════════════════════════
-//  POS
-// ════════════════════════════════════════
-function renderPOS(pc){
-  posCart={};
-  pc.innerHTML=`<div class="g2">
-    <div>
-      <div class="card mb16">
-        <div class="card-title">Productos</div>
-        ${posProducts.length===0
-          ? '<div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:28px;margin-bottom:8px">🏷️</div>Ve a Productos para configurar el catálogo</div>'
-          : `<div class="pos-grid">${posProducts.map(p=>`<div class="pos-item" id="pos-p-${p.id}" onclick="addToCart('${p.id}')"><div class="p-name">${p.name}</div><div class="p-price">${fmt(p.price)}€</div></div>`).join('')}</div>`
-        }
-      </div>
-    </div>
-    <div>
-      <div class="card mb16" id="pos-cart-card">
-        <div class="card-title">Cuenta</div>
-        <div id="pos-cart-items" style="min-height:60px"><div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Selecciona productos</div></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;border-top:1px solid var(--border);margin-top:12px">
-          <span style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Total</span>
-          <span class="cart-total" id="pos-cart-total">0,00€</span>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:14px">
-          <button class="btn btn-g" style="flex:1" onclick="clearCart()">Borrar</button>
-          <button class="btn btn-p btn-lg" style="flex:2" onclick="startPOSCharge()">Cobrar</button>
-        </div>
-      </div>
-      <div class="nfc-scan" id="pos-scan-area" style="display:none">
-        <div class="nfc-ring scanning" id="pos-nfc-ring"><span class="emoji">📡</span></div>
-        <div class="nfc-label">Acerca la pulsera</div>
-        <div class="nfc-sub" id="pos-scan-sub">Esperando pulsera NFC...</div>
-        <button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button>
-        <button class="btn btn-g" style="margin-top:8px" onclick="cancelPOSCharge()">Cancelar</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function addToCart(id){posCart[id]=(posCart[id]||0)+1;updateCartUI();}
-function removeFromCart(id){if(posCart[id])posCart[id]--;if(posCart[id]<=0)delete posCart[id];updateCartUI();}
-function clearCart(){posCart={};updateCartUI();document.getElementById('pos-scan-area').style.display='none';document.getElementById('pos-cart-card').style.display='block';}
-function getCartTotal(){let t=0;for(const[id,qty]of Object.entries(posCart)){const p=posProducts.find(x=>x.id===id);if(p)t+=p.price*qty;}return t;}
-
-function updateCartUI(){
-  const items=document.getElementById('pos-cart-items');
-  const totalEl=document.getElementById('pos-cart-total');
-  const entries=Object.entries(posCart).filter(([,q])=>q>0);
-  if(!entries.length){
-    items.innerHTML='<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Selecciona productos</div>';
-    totalEl.textContent='0,00€'; return;
-  }
-  items.innerHTML=entries.map(([id,qty])=>{
-    const p=posProducts.find(x=>x.id===id); if(!p)return'';
-    return `<div class="cart-row"><div style="display:flex;align-items:center;gap:10px"><button class="btn btn-g" style="width:32px;height:32px;min-height:32px;font-size:16px;padding:0;border-radius:8px" onclick="removeFromCart('${id}')">−</button><span>${p.name} ×${qty}</span></div><span style="font-weight:600;color:var(--a1)">${fmt(p.price*qty)}€</span></div>`;
-  }).join('');
-  totalEl.textContent=fmt(getCartTotal())+'€';
-  document.querySelectorAll('.pos-item').forEach(el=>el.classList.remove('in-cart'));
-  for(const id of Object.keys(posCart)) document.getElementById('pos-p-'+id)?.classList.add('in-cart');
-}
-
-function startPOSCharge(){
-  const t=getCartTotal();
-  if(t<=0){toast('Añade productos primero');return;}
-  document.getElementById('pos-cart-card').style.display='none';
-  document.getElementById('pos-scan-area').style.display='flex';
-  document.getElementById('pos-scan-sub').textContent=`Total: ${fmt(t)}€ — Esperando pulsera...`;
-}
-
-function cancelPOSCharge(){
-  document.getElementById('pos-scan-area').style.display='none';
-  document.getElementById('pos-cart-card').style.display='block';
-}
-
-async function onPOSScan(uid){
-  const scanArea=document.getElementById('pos-scan-area');
-  if(!scanArea||scanArea.style.display==='none') return;
-  const total=getCartTotal(); if(total<=0)return;
-  const ring=document.getElementById('pos-nfc-ring');
-  const sub=document.getElementById('pos-scan-sub');
-  ring.className='nfc-ring'; sub.textContent='Procesando...';
-
-  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
-  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='Pulsera no registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},2000);return;}
-  if(wb.status!=='active'){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='🚫';sub.textContent='Pulsera bloqueada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},2000);return;}
-  if(parseFloat(wb.balance)<total){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='💸';sub.textContent=`Saldo insuficiente: ${fmt(wb.balance)}€ (necesita ${fmt(total)}€)`;if(navigator.vibrate)navigator.vibrate([200,100,200]);setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},3000);return;}
-
-  const newBal=parseFloat(wb.balance)-total;
-  const desc=Object.entries(posCart).map(([id,qty])=>{const p=posProducts.find(x=>x.id===id);return p?p.name+' x'+qty:'';}).filter(Boolean).join(', ');
-  await _sb.from('rfid_wristbands').update({balance:newBal,total_spent:parseFloat(wb.total_spent||0)+total,last_used_at:new Date().toISOString()}).eq('id',wb.id);
-  await _sb.from('rfid_transactions').insert({wristband_id:wb.id,event_id:selectedEvent?.id,type:'purchase',amount:-total,balance_after:newBal,description:desc,point_of_sale:'POS',operator:userProfile.nombre,payment_method:'cashless'});
-  showResult('success','✅','Cobrado: '+fmt(total)+'€','Saldo restante: '+fmt(newBal)+'€ · '+(wb.holder_name||''));
-  posCart={};
-  setTimeout(()=>{hideResult();cancelPOSCharge();updateCartUI();},2500);
-}
-
-// ════════════════════════════════════════
-//  TOPUP
-// ════════════════════════════════════════
-let topupAmount=0, topupWristband=null, topupCheckInterval=null;
-
-function renderTopup(pc){
-  topupAmount=0; topupWristband=null;
-  pc.innerHTML=`<div class="g2">
-    <div>
-      <div class="card mb16">
-        <div class="card-title">1. Escanear pulsera</div>
-        <div class="nfc-scan" style="padding:20px">
-          <div class="nfc-ring scanning" id="topup-nfc-ring" style="width:120px;height:120px"><span class="emoji" style="font-size:36px">📡</span></div>
-          <div class="nfc-label" style="font-size:15px;margin-top:12px">Acerca la pulsera</div>
-          <div class="nfc-sub" id="topup-scan-sub">Primero identifica la pulsera</div>
-          <button class="btn btn-g" style="margin-top:12px;font-size:13px" onclick="manualUIDInput()">UID manual</button>
-        </div>
-        <div id="topup-wristband-info" style="display:none;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-top:12px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div><div style="font-weight:600" id="topup-holder-name">—</div><div style="font-size:12px;color:var(--muted);font-family:monospace" id="topup-holder-uid">—</div></div>
-            <div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Saldo actual</div><div style="font-family:Syne;font-weight:700;font-size:22px;color:var(--a1)" id="topup-holder-bal">0€</div></div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">2. Seleccionar importe</div>
-        <div class="topup-grid">
-          ${[5,10,20,30,50,100].map(a=>`<div class="topup-btn" onclick="selectTopup(${a},this)"><div class="amount">${a}€</div></div>`).join('')}
-        </div>
-        <label class="form-lbl">O cantidad personalizada</label>
-        <input class="form-input" id="topup-custom" type="number" min="1" step="0.5" placeholder="Ej: 15" oninput="customTopup(this.value)" style="margin-bottom:0"/>
-      </div>
-    </div>
-    <div>
-      <div class="card">
-        <div class="card-title">3. Cobrar con SumUp</div>
-        <div style="text-align:center;padding:20px">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Importe a cobrar</div>
-          <div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1)" id="topup-amount-display">0,00€</div>
-          <div id="topup-holder-label" style="font-size:13px;color:var(--muted);margin-top:4px">—</div>
-        </div>
-        <div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span>🔒</span><span style="font-size:13px;color:var(--warn)">El saldo solo se añade cuando SumUp confirma el pago</span></div>
-          <div style="font-size:12px;color:var(--muted)">Evita recargas sin cobro real.</div>
-        </div>
-        <button class="btn btn-p btn-full btn-lg" id="topup-sumup-btn" onclick="startSumUpTopup()" disabled style="opacity:.5">Cobrar con SumUp</button>
-        <div style="margin-top:12px;text-align:center">
-          <button class="btn btn-g" style="font-size:13px" onclick="requestManualTopup()">⚠️ Recarga manual (solo admin)</button>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-
-function selectTopup(a,el){topupAmount=a;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));el.classList.add('selected');document.getElementById('topup-custom').value='';updateTopupUI();}
-function customTopup(v){topupAmount=parseFloat(v)||0;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));updateTopupUI();}
-
-function updateTopupUI(){
-  const fee=topupAmount>0?Math.round(topupAmount*3.5)/100:0;
-  const total=topupAmount+fee;
-  document.getElementById('topup-amount-display').textContent=topupAmount>0?fmt(topupAmount)+'€':'0,00€';
-  document.getElementById('topup-holder-label').textContent=topupWristband
-    ?(topupWristband.holder_name||topupWristband.uid)+(fee>0?' · Pago total: '+fmt(total)+'€ (incl. '+fmt(fee)+'€ comisión)':'')
-    :'Escanea la pulsera primero';
-  const btn=document.getElementById('topup-sumup-btn');
-  if(topupAmount>0&&topupWristband){btn.disabled=false;btn.style.opacity='1';btn.textContent='Cobrar '+fmt(total)+'€ con SumUp';}
-  else{btn.disabled=true;btn.style.opacity='.5';btn.textContent='Cobrar con SumUp';}
-}
-
-async function onTopupScan(uid){
-  const ring=document.getElementById('topup-nfc-ring'),sub=document.getElementById('topup-scan-sub');
-  ring.className='nfc-ring'; sub.textContent='Buscando...';
-  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
-  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='No registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent='Primero identifica la pulsera';},2000);return;}
-  topupWristband=wb;
-  ring.className='nfc-ring success'; ring.querySelector('.emoji').textContent='✅'; sub.textContent='Pulsera identificada';
-  document.getElementById('topup-wristband-info').style.display='block';
-  document.getElementById('topup-holder-name').textContent=wb.holder_name||'Sin nombre';
-  document.getElementById('topup-holder-uid').textContent=uid;
-  document.getElementById('topup-holder-bal').textContent=fmt(wb.balance)+'€';
-  updateTopupUI();
-}
-
-function startSumUpTopup(){
-  if(!topupWristband||topupAmount<=0)return;
-  const btn=document.getElementById('topup-sumup-btn');
-  btn.disabled=true; btn.textContent='Creando pago...';
-  fetch('https://inout-api.vercel.app/api/rfid/topup',{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({wristband_id:topupWristband.id,uid:topupWristband.uid,amount:topupAmount,event_id:selectedEvent?.id,operator:userProfile.nombre})
-  })
-  .then(r=>r.json())
-  .then(data=>{
-    if(data.error){toast('Error: '+data.error);btn.disabled=false;btn.textContent='Cobrar con SumUp';return;}
-    sessionStorage.setItem('topup_sumup_id',data.sumup_checkout_id);
-    sessionStorage.setItem('topup_wristband_id',topupWristband.id);
-    sessionStorage.setItem('topup_amount',String(topupAmount));
-    sessionStorage.setItem('topup_ref',data.reference);
-    const isAndroid=/Android/i.test(navigator.userAgent);
-    if(isAndroid){
-      const fee=Math.round(topupAmount*3.5)/100;
-      window.location.href='sumupmerchant://pay/1.0'
-        +'?affiliate-key=sup_afk_Yw5nEDC5oRf34ycz09JFqPkR1DLQR5MH'
-        +'&app-id=com.inoutmedia.valid'
-        +'&total='+(topupAmount+fee).toFixed(2)
-        +'&currency=EUR'
-        +'&title='+encodeURIComponent('Recarga '+(topupWristband.holder_name||topupWristband.uid))
-        +'&foreign-tx-id='+data.reference
-        +'&skip-screen-success=true'
-        +'&callback='+encodeURIComponent('https://inout-valid.vercel.app/#topup');
-    } else {
-      window.open(data.checkout_url,'_blank');
-    }
-    document.getElementById('page-content').innerHTML=`<div style="max-width:500px;margin:40px auto;text-align:center"><div class="card"><div style="font-size:48px;margin-bottom:16px">💳</div><div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">Pago en proceso</div><div style="font-size:15px;color:var(--muted);margin-bottom:8px">${topupWristband.holder_name||topupWristband.uid}</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">${fmt(topupAmount)}€</div><div id="topup-verify-status" style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;font-size:14px;color:var(--warn)">⏳ Esperando confirmación...</div><div style="display:flex;gap:10px;flex-direction:column"><button class="btn btn-p btn-full btn-lg" onclick="checkTopupPayment()">🔄 Verificar pago</button><button class="btn btn-danger btn-full" onclick="cancelSumUpPayment()">❌ Cancelar</button></div></div></div>`;
-    topupCheckInterval=setInterval(()=>checkTopupPayment(),5000);
-  })
-  .catch(err=>{toast('Error: '+err.message);btn.disabled=false;btn.textContent='Cobrar con SumUp';});
-}
-
-function checkTopupPayment(){
-  const sumupId=sessionStorage.getItem('topup_sumup_id');
-  const wbId=sessionStorage.getItem('topup_wristband_id');
-  const amount=sessionStorage.getItem('topup_amount');
-  const ref=sessionStorage.getItem('topup_ref');
-  if(!sumupId||!wbId)return;
-  const el=document.getElementById('topup-verify-status');
-  if(el)el.innerHTML='🔄 Verificando...';
-  fetch(`https://inout-api.vercel.app/api/rfid/verify-topup?wristband=${wbId}&amount=${amount}&ref=${ref}&sumup_id=${sumupId}`)
-  .then(r=>r.json())
-  .then(data=>{
-    if(data.status==='completed'||data.status==='already_completed'){
-      if(topupCheckInterval){clearInterval(topupCheckInterval);topupCheckInterval=null;}
-      ['topup_sumup_id','topup_wristband_id','topup_amount','topup_ref'].forEach(k=>sessionStorage.removeItem(k));
-      showResult('success','💰','+'+fmt(parseFloat(amount))+'€ recargados','Nuevo saldo: '+fmt(data.balance)+'€ · '+(data.holder_name||''));
-      topupWristband=null;topupAmount=0;
-      setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
-    }else{
-      if(el)el.innerHTML='⏳ Pago pendiente ('+(data.sumup_status||'procesando')+')<br><span style="font-size:12px;color:var(--muted)">Se verifica cada 5 seg.</span>';
-    }
-  })
-  .catch(()=>{if(el)el.textContent='⚠️ Error verificando. Reintenta.';});
-}
-
-function cancelSumUpPayment(){
-  if(topupCheckInterval){clearInterval(topupCheckInterval);topupCheckInterval=null;}
-  ['topup_sumup_id','topup_wristband_id','topup_amount','topup_ref'].forEach(k=>sessionStorage.removeItem(k));
-  toast('Recarga cancelada');topupWristband=null;topupAmount=0;
-  renderTopup(document.getElementById('page-content'));
-}
-
-// ── Recarga manual — ahora usa modal PIN integrado ──
-function requestManualTopup(){
-  if(!topupWristband){toast('Escanea una pulsera primero');return;}
-  if(topupAmount<=0){toast('Selecciona un importe');return;}
-  modalAdminPIN(
-    '🔒 PIN de administrador',
-    `Recarga manual de ${fmt(topupAmount)}€ a ${topupWristband.holder_name||topupWristband.uid}`,
-    () => confirmManualTopup()
+// Asegura que todos los productos del catálogo tienen una instancia en el evento
+// Se llama al entrar en la pantalla de productos
+async function syncCatalogToEvent(eventId){
+  if(!eventId) return;
+  const[{data:catalog},{data:existing}]=await Promise.all([
+    _sb.from('rfid_products_catalog').select('id,name,category,default_price').eq('active',true),
+    _sb.from('rfid_products').select('catalog_id').eq('event_id',eventId)
+  ]);
+  const existingIds=new Set((existing||[]).map(p=>p.catalog_id).filter(Boolean));
+  const missing=(catalog||[]).filter(c=>!existingIds.has(c.id));
+  if(!missing.length) return;
+  // Insertar los que faltan como inactivos con precio por defecto
+  await _sb.from('rfid_products').insert(
+    missing.map((c,i)=>({
+      event_id:   eventId,
+      catalog_id: c.id,
+      name:       c.name,
+      category:   c.category,
+      price:      c.default_price||0,
+      stock:      0,
+      active:     false,   // siempre inactivo por defecto
+      sort_order: i,
+    }))
   );
 }
 
-// Se llama tras PIN correcto
-function confirmManualTopup(){
-  const _wb = topupWristband;
-  const _amt = topupAmount;
-  // Confirmación visual (sin confirm nativo)
+// ════════════════════════════════════════
+//  PRODUCTS — pantalla de gestión
+// ════════════════════════════════════════
+async function renderProducts(pc){
+  // Sincronizar catálogo → evento (añade productos nuevos del catálogo como inactivos)
+  await syncCatalogToEvent(selectedEvent?.id);
+  const todos = await loadAllProductsForEvent();
+  const activos   = todos.filter(p=>p.active).length;
+  const inactivos = todos.length - activos;
+
+  pc.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-family:Syne;font-weight:700;font-size:20px">${todos.length} productos</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">
+          <span style="color:var(--success)">${activos} activos</span> · 
+          <span style="color:var(--muted)">${inactivos} inactivos</span> en 
+          <strong style="color:var(--a3)">${selectedEvent?.nombre||'este evento'}</strong>
+        </div>
+      </div>
+      <button class="btn btn-p" onclick="modalAddCatalogProduct()">+ Nuevo producto global</button>
+    </div>
+
+    <div style="padding:10px 14px;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.15);border-radius:10px;font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+      💡 Los productos son un <strong style="color:var(--txt)">catálogo global</strong>. Cada evento tiene su propia instancia con precio, stock y estado independientes.
+      Los nuevos productos aparecen <strong style="color:var(--warn)">inactivos</strong> hasta que los actives.
+    </div>
+
+    ${!todos.length
+      ? `<div class="card" style="text-align:center;padding:40px">
+           <div style="font-size:48px;margin-bottom:12px">🏷️</div>
+           <div style="color:var(--muted);margin-bottom:16px">Sin productos en el catálogo.</div>
+           <button class="btn btn-p" onclick="modalAddCatalogProduct()">+ Crear primer producto</button>
+         </div>`
+      : `<div class="card" style="padding:0;overflow:hidden">
+           <div class="tbl-wrap">
+             <table>
+               <thead>
+                 <tr>
+                   <th>Nombre</th>
+                   <th>Precio</th>
+                   <th>Categoría</th>
+                   <th style="text-align:right">Stock</th>
+                   <th style="text-align:center">Estado</th>
+                   <th style="text-align:right">Acciones</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 ${todos.map(p=>`
+                   <tr id="prod-row-${p.id}" style="${!p.active?'opacity:.6':''}">
+                     <td><div style="font-weight:500">${p.name}</div></td>
+                     <td><div style="color:var(--a1);font-weight:700;font-family:'Syne',sans-serif">${fmt(p.price)}€</div></td>
+                     <td><span class="badge b-gray">${p.category||'—'}</span></td>
+                     <td style="text-align:right">
+                       <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                         <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;color:${(p.stock||0)===0?'var(--muted)':(p.stock||0)<10?'var(--warn)':'var(--a1)'}">${p.stock||0}</span>
+                         <div style="display:flex;flex-direction:column;gap:2px">
+                           <button onclick="changeStock('${p.id}',${(p.stock||0)+1})" style="width:20px;height:16px;background:var(--surf);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--muted);font-size:10px;line-height:1">▲</button>
+                           <button onclick="changeStock('${p.id}',${Math.max(0,(p.stock||0)-1)})" style="width:20px;height:16px;background:var(--surf);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--muted);font-size:10px;line-height:1">▼</button>
+                         </div>
+                       </div>
+                     </td>
+                     <td style="text-align:center">
+                       <div onclick="toggleProductActive('${p.id}',${!p.active},'${p.name.replace(/'/g,"\\'")}',this)"
+                            style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;transition:all .15s;min-width:90px;justify-content:center;
+                              ${p.active
+                                ? 'background:rgba(0,230,118,.12);color:var(--success);border:1px solid rgba(0,230,118,.25)'
+                                : 'background:rgba(107,107,136,.1);color:var(--muted);border:1px solid var(--border)'}">
+                         <span style="width:8px;height:8px;border-radius:50%;background:${p.active?'var(--success)':'var(--muted)'};flex-shrink:0;${p.active?'box-shadow:0 0 5px rgba(0,230,118,.6)':''}"></span>
+                         ${p.active?'Activo':'Inactivo'}
+                       </div>
+                     </td>
+                     <td style="text-align:right">
+                       <div style="display:flex;gap:6px;justify-content:flex-end">
+                         <button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-height:34px" onclick="modalEditProduct('${p.id}','${p.name.replace(/'/g,"\\'")}',${p.price},'${p.category||'General'}',${p.active},${p.stock||0})">✏️</button>
+                         <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;min-height:34px" onclick="confirmDeleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">✕</button>
+                       </div>
+                     </td>
+                   </tr>`).join('')}
+               </tbody>
+             </table>
+           </div>
+         </div>`
+    }`;
+}
+
+// ── Toggle activo/inactivo inline ──────────────────────────────────────────
+async function toggleProductActive(id, newActive, name, el){
+  // Feedback visual inmediato
+  el.style.opacity='0.5';
+  const{error}=await _sb.from('rfid_products').update({active:newActive}).eq('id',id);
+  if(error){ toast('Error: '+error.message); el.style.opacity='1'; return; }
+  toast(newActive?`"${name}" activado ✓`:`"${name}" desactivado`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// ── Cambiar stock con los botones ▲▼ ──────────────────────────────────────
+async function changeStock(id, newStock){
+  const{error}=await _sb.from('rfid_products').update({stock:newStock}).eq('id',id);
+  if(error){ toast('Error stock: '+error.message); return; }
+  // Actualizar solo el número en la fila sin re-renderizar toda la tabla
+  renderProducts(document.getElementById('page-content'));
+}
+
+// ── Modal añadir producto al catálogo global ──────────────────────────────
+function modalAddCatalogProduct(){
+  const categories=['Bebidas','Comida','Merch','General','Otros'];
   document.getElementById('modal-box').innerHTML=`
-    <div class="modal-title">⚠️ Confirmar recarga manual</div>
-    <div class="modal-sub">Sin cobro SumUp — solo en casos excepcionales.</div>
-    <div style="background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.2);border-radius:10px;padding:14px;margin-bottom:16px">
-      <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">
-        <span style="color:var(--muted)">Pulsera</span><strong>${_wb.holder_name||_wb.uid}</strong>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:20px;font-family:Syne;font-weight:800">
-        <span style="color:var(--muted);font-size:13px">Importe</span><span style="color:var(--a1)">+${fmt(_amt)}€</span>
-      </div>
+    <div class="modal-title">🏷️ Nuevo producto global</div>
+    <div class="modal-sub">Se añadirá al catálogo y aparecerá <strong style="color:var(--warn)">inactivo</strong> en todos los eventos actuales y futuros.</div>
+    <div id="modal-err" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
+    <label class="form-lbl">Nombre del producto</label>
+    <input class="form-input" id="mp-nombre" placeholder="Ej: Cocacola, Cerveza, Camiseta…" autocomplete="off"/>
+    <label class="form-lbl">Precio por defecto (€)</label>
+    <input class="form-input" id="mp-precio" type="number" min="0" step="0.01" placeholder="3.50"/>
+    <label class="form-lbl">Categoría</label>
+    <select class="form-select" id="mp-cat">
+      ${categories.map(c=>`<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <div style="padding:10px 14px;background:rgba(255,171,0,.06);border:1px solid rgba(255,171,0,.15);border-radius:8px;font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+      ⚙️ Cada evento puede personalizar el precio y el stock. El producto arrancará <strong style="color:var(--warn)">inactivo</strong> hasta que el responsable lo active.
     </div>
     <div style="display:flex;gap:10px">
       <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-danger" style="flex:2" onclick="executeManualTopup()">⚠️ Confirmar recarga</button>
+      <button class="btn btn-p" style="flex:2" onclick="submitAddCatalogProduct()">Crear en catálogo</button>
     </div>`;
   document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(()=>{
+    document.getElementById('mp-nombre')?.focus();
+    document.getElementById('mp-precio')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitAddCatalogProduct();});
+  }, 80);
 }
 
-async function executeManualTopup(){
+async function submitAddCatalogProduct(){
+  const nombre = document.getElementById('mp-nombre')?.value?.trim();
+  const precio = parseFloat(document.getElementById('mp-precio')?.value)||0;
+  const cat    = document.getElementById('mp-cat')?.value||'General';
+  const err    = document.getElementById('modal-err');
+  if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
+  const btn = document.querySelector('#modal-box .btn-p');
+  if(btn){ btn.disabled=true; btn.textContent='Creando…'; }
+
+  // 1. Insertar en catálogo maestro
+  const{data:catItem, error:catErr}=await _sb.from('rfid_products_catalog').insert({
+    name:nombre, category:cat, default_price:precio, active:true
+  }).select().single();
+
+  if(catErr){
+    // Si la tabla no existe, fallback: crear solo en rfid_products de todos los eventos
+    if(catErr.code==='42P01'){
+      await submitAddProduct_fallback(nombre, precio, cat, err, btn);
+      return;
+    }
+    err.textContent='Error catálogo: '+catErr.message; err.style.display='block';
+    if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return;
+  }
+
+  // 2. Crear instancia inactiva en TODOS los eventos existentes
+  const{data:eventos}=await _sb.from('events').select('id')
+    .in('estado',['publicado','confirmado','produccion','borrador','finalizado']);
+  const eventosIds=(eventos||[]).map(e=>e.id);
+
+  if(eventosIds.length){
+    await _sb.from('rfid_products').insert(
+      eventosIds.map((eid,i)=>({
+        event_id:   eid,
+        catalog_id: catItem.id,
+        name:       nombre,
+        category:   cat,
+        price:      precio,
+        stock:      0,
+        active:     false,    // siempre inactivo por defecto
+        sort_order: 9999+i,
+      }))
+    );
+  }
+
   closeModal();
-  const newBal=parseFloat(topupWristband.balance)+topupAmount;
-  await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(topupWristband.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',topupWristband.id);
-  await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'⚠️ Recarga manual ('+userProfile.nombre+')',point_of_sale:'Manual',operator:userProfile.nombre,payment_method:'manual'});
-  showResult('success','⚠️','Recarga manual: +'+fmt(topupAmount)+'€','Nuevo saldo: '+fmt(newBal)+'€');
-  topupWristband=null;topupAmount=0;
-  setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+  toast(`"${nombre}" añadido al catálogo — inactivo en ${eventosIds.length} evento(s) ✓`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
 }
 
-// ════════════════════════════════════════
-//  REGISTER
-// ════════════════════════════════════════
-let registerUID=null;
-function renderRegister(pc){
-  registerUID=null;
-  pc.innerHTML=`<div class="g2">
-    <div>
-      <div class="nfc-scan">
-        <div class="nfc-ring scanning" id="reg-nfc-ring"><span class="emoji">📡</span></div>
-        <div class="nfc-label">Acerca la pulsera nueva</div>
-        <div class="nfc-sub" id="reg-sub">Esperando pulsera NFC...</div>
-        <button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button>
+// Fallback si rfid_products_catalog no existe aún (compatibilidad hacia atrás)
+async function submitAddProduct_fallback(nombre, precio, cat, err, btn){
+  const{data:eventos}=await _sb.from('events').select('id')
+    .in('estado',['publicado','confirmado','produccion','borrador']);
+  const eventosIds=(eventos||[]).map(e=>e.id);
+  if(!eventosIds.length){ err.textContent='No hay eventos'; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return; }
+  const{error}=await _sb.from('rfid_products').insert(
+    eventosIds.map((eid,i)=>({event_id:eid,name:nombre,price:precio,category:cat,active:false,stock:0,sort_order:9999+i}))
+  );
+  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return; }
+  closeModal();
+  toast(`"${nombre}" añadido (inactivo) en ${eventosIds.length} evento(s) ✓`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// Mantener compatibilidad con el botón "+ Añadir producto" antiguo
+function modalAddProduct(){ modalAddCatalogProduct(); }
+async function submitAddProduct(){ await submitAddCatalogProduct(); }
+
+// ── Modal editar — precio, stock y estado por evento ──────────────────────
+function modalEditProduct(id, nombre, precio, categoria, activo, stock){
+  const categories=['Bebidas','Comida','Merch','General','Otros'];
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">✏️ Editar producto</div>
+    <div class="modal-sub">Cambios aplicados <strong style="color:var(--a3)">solo en ${selectedEvent?.nombre||'este evento'}</strong>.</div>
+    <div id="modal-err" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
+
+    <label class="form-lbl">Nombre</label>
+    <input class="form-input" id="ep-nombre" value="${nombre}"/>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label class="form-lbl">Precio en este evento (€)</label>
+        <input class="form-input" id="ep-precio" type="number" min="0" step="0.01" value="${precio}" style="margin-bottom:0"/>
+      </div>
+      <div>
+        <label class="form-lbl">Stock disponible</label>
+        <input class="form-input" id="ep-stock" type="number" min="0" step="1" value="${stock||0}" style="margin-bottom:0"/>
       </div>
     </div>
-    <div>
-      <div class="card" id="reg-form-card" style="opacity:.4;pointer-events:none">
-        <div class="card-title">Datos del asistente</div>
-        <div style="padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:13px"><span style="color:var(--muted)">UID:</span> <strong id="reg-uid-display" style="color:var(--a1);font-family:monospace">—</strong></div>
-        <label class="form-lbl">Nombre</label><input class="form-input" id="reg-nombre" placeholder="Nombre del asistente"/>
-        <label class="form-lbl">Email</label><input class="form-input" id="reg-email" type="email" placeholder="email@ejemplo.com"/>
-        <label class="form-lbl">Teléfono</label><input class="form-input" id="reg-phone" type="tel" placeholder="600 000 000"/>
-        <button class="btn btn-p btn-full btn-lg" style="margin-top:4px" onclick="doRegister()">Registrar pulsera</button>
+
+    <label class="form-lbl" style="margin-top:14px">Categoría</label>
+    <select class="form-select" id="ep-cat">
+      ${categories.map(c=>`<option value="${c}" ${c===categoria?'selected':''}>${c}</option>`).join('')}
+    </select>
+
+    <label class="form-lbl">Estado en este evento</label>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div id="ep-on" onclick="setEditActive(true)" style="flex:1;padding:14px;border-radius:10px;text-align:center;cursor:pointer;transition:all .15s;
+        border:2px solid ${activo?'var(--success)':'var(--border)'};background:${activo?'rgba(0,230,118,.08)':'transparent'}">
+        <div style="font-size:22px;margin-bottom:4px">✅</div>
+        <div style="font-weight:600;font-size:13px;color:${activo?'var(--success)':'var(--muted)'}">Activo</div>
+        <div style="font-size:11px;color:var(--muted)">Visible en POS</div>
+      </div>
+      <div id="ep-off" onclick="setEditActive(false)" style="flex:1;padding:14px;border-radius:10px;text-align:center;cursor:pointer;transition:all .15s;
+        border:2px solid ${!activo?'var(--danger)':'var(--border)'};background:${!activo?'rgba(255,23,68,.08)':'transparent'}">
+        <div style="font-size:22px;margin-bottom:4px">⛔</div>
+        <div style="font-weight:600;font-size:13px;color:${!activo?'var(--danger)':'var(--muted)'}">Inactivo</div>
+        <div style="font-size:11px;color:var(--muted)">Oculto en POS</div>
       </div>
     </div>
-  </div>`;
-}
+    <input type="hidden" id="ep-activo-val" value="${activo}"/>
 
-function onRegisterScan(uid){
-  registerUID=uid;
-  document.getElementById('reg-nfc-ring').className='nfc-ring success';
-  document.getElementById('reg-nfc-ring').querySelector('.emoji').textContent='✅';
-  document.getElementById('reg-sub').textContent='UID: '+uid;
-  document.getElementById('reg-uid-display').textContent=uid;
-  const f=document.getElementById('reg-form-card');
-  f.style.opacity='1'; f.style.pointerEvents='auto';
-  document.getElementById('reg-nombre').focus();
-}
-
-async function doRegister(){
-  if(!registerUID){toast('Escanea una pulsera primero');return;}
-  const{data:existing}=await _sb.from('rfid_wristbands').select('id').eq('uid',registerUID).single();
-  if(existing){toast('⚠️ Esta pulsera ya está registrada');return;}
-  const{error}=await _sb.from('rfid_wristbands').insert({
-    uid:registerUID, event_id:selectedEvent?.id,
-    holder_name:document.getElementById('reg-nombre').value.trim()||null,
-    holder_email:document.getElementById('reg-email').value.trim()||null,
-    holder_phone:document.getElementById('reg-phone').value.trim()||null,
-    balance:0, total_loaded:0, total_spent:0, status:'active',
-    registered_by:userProfile.nombre
-  });
-  if(error){toast('Error: '+error.message);return;}
-  showResult('success','🎉','Pulsera registrada',(document.getElementById('reg-nombre').value||registerUID)+' — Saldo: 0,00€');
-  setTimeout(()=>{hideResult();renderRegister(document.getElementById('page-content'));},2000);
-}
-
-// ════════════════════════════════════════
-//  ACCESS CONTROL
-// ════════════════════════════════════════
-function renderAccess(pc){
-  pc.innerHTML=`
-    <div class="access-stats" id="acc-stats">
-      <div class="acc-stat"><div class="val" id="acc-inside" style="color:var(--success)">—</div><div class="lbl">Dentro ahora</div></div>
-      <div class="acc-stat"><div class="val" id="acc-entries" style="color:var(--a3)">—</div><div class="lbl">Entradas hoy</div></div>
-      <div class="acc-stat"><div class="val" id="acc-exits" style="color:var(--muted)">—</div><div class="lbl">Salidas hoy</div></div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 0 10px">
-      <div class="nfc-ring scanning" style="width:200px;height:200px" id="acc-ring">
-        <span class="emoji" style="font-size:64px">🚪</span>
-      </div>
-      <div class="nfc-label" style="margin-top:20px;font-size:22px">Control de Acceso</div>
-      <div class="nfc-sub" style="font-size:15px" id="acc-sub">Acerca la pulsera al lector</div>
-      <button class="btn btn-g" style="margin-top:20px" onclick="manualUIDInput()">UID manual</button>
-    </div>
-    <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:8px">
-      <div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Sin registros recientes</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" style="flex:2" onclick="submitEditProduct('${id}')">Guardar</button>
     </div>`;
-  loadAccessStats();
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(()=>document.getElementById('ep-nombre')?.focus(), 80);
 }
 
-async function loadAccessStats(){
-  if(!selectedEvent) return;
-  const today=new Date(); today.setHours(0,0,0,0);
-  const{data:logs}=await _sb.from('rfid_access_log')
-    .select('direction,created_at,rfid_wristbands(holder_name,uid)')
-    .eq('event_id',selectedEvent.id)
-    .gte('created_at',today.toISOString())
-    .order('created_at',{ascending:false})
-    .limit(50);
-  if(!logs) return;
-  const entries=logs.filter(l=>l.direction==='in').length;
-  const exits=logs.filter(l=>l.direction==='out').length;
-  const inside=Math.max(0,entries-exits);
-  const elIn=document.getElementById('acc-inside');
-  const elEnt=document.getElementById('acc-entries');
-  const elEx=document.getElementById('acc-exits');
-  if(elIn) elIn.textContent=inside;
-  if(elEnt) elEnt.textContent=entries;
-  if(elEx) elEx.textContent=exits;
-  const logEl=document.getElementById('acc-log');
-  if(logEl&&logs.length>0){
-    logEl.innerHTML=logs.slice(0,20).map(l=>{
-      const isIn=l.direction==='in';
-      const name=l.rfid_wristbands?.holder_name||l.rfid_wristbands?.uid||'—';
-      const time=new Date(l.created_at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-      return `<div class="acc-log-item"><div class="acc-dir ${isIn?'in':'out'}">${isIn?'↗️':'↙️'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--muted)">${time}</div></div><span class="badge ${isIn?'b-green':'b-blue'}">${isIn?'ENTRADA':'SALIDA'}</span></div>`;
-    }).join('');
+function setEditActive(val){
+  document.getElementById('ep-activo-val').value=String(val);
+  const on=document.getElementById('ep-on'), off=document.getElementById('ep-off');
+  if(val){
+    on.style.borderColor='var(--success)'; on.style.background='rgba(0,230,118,.08)';
+    on.querySelector('div:nth-child(2)').style.color='var(--success)';
+    off.style.borderColor='var(--border)'; off.style.background='transparent';
+    off.querySelector('div:nth-child(2)').style.color='var(--muted)';
+  } else {
+    off.style.borderColor='var(--danger)'; off.style.background='rgba(255,23,68,.08)';
+    off.querySelector('div:nth-child(2)').style.color='var(--danger)';
+    on.style.borderColor='var(--border)';  on.style.background='transparent';
+    on.querySelector('div:nth-child(2)').style.color='var(--muted)';
   }
 }
 
-async function onAccessScan(uid){
-  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).maybeSingle();
-  if(!wb){showAccessResult(false,'NO REGISTRADA','UID: '+uid);return;}
-  if(wb.status!=='active'){showAccessResult(false,'BLOQUEADA',wb.holder_name||uid);return;}
-  const{data:lastLog}=await _sb.from('rfid_access_log').select('direction').eq('wristband_id',wb.id).eq('event_id',selectedEvent?.id).order('created_at',{ascending:false}).limit(1).maybeSingle();
-  const dir=(!lastLog||lastLog.direction==='out')?'in':'out';
-  await _sb.from('rfid_access_log').insert({wristband_id:wb.id,event_id:selectedEvent?.id,direction:dir,gate:'Principal',operator:userProfile.nombre});
-  showAccessResult(true,dir==='in'?'✅ ENTRADA':'🔵 SALIDA',wb.holder_name||uid,wb.balance);
-  setTimeout(()=>loadAccessStats(),500);
-}
-
-function showAccessResult(ok,title,name='',balance=null){
-  const d=document.createElement('div');
-  d.className='access-full '+(ok?'granted':'denied');
-  d.innerHTML=`
-    <div style="font-size:80px">${ok?(title.includes('ENTRADA')?'🟢':'🔵'):'🔴'}</div>
-    <div class="access-text" style="color:${ok?(title.includes('ENTRADA')?'var(--success)':'var(--a3)'):'var(--danger)'}">${title}</div>
-    <div class="access-sub">${name}</div>
-    ${balance!==null?`<div class="access-balance">Saldo: ${fmt(balance)}€</div>`:''}`;
-  d.onclick=()=>d.remove();
-  document.body.appendChild(d);
-  if(navigator.vibrate) navigator.vibrate(ok?100:[200,100,200]);
-  setTimeout(()=>d.remove(),2800);
-}
-
-// ════════════════════════════════════════
-//  BALANCE
-// ════════════════════════════════════════
-function renderBalance(pc){
-  pc.innerHTML=`<div style="max-width:500px;margin:0 auto">
-    <div class="nfc-scan">
-      <div class="nfc-ring scanning" id="bal-nfc-ring"><span class="emoji">💰</span></div>
-      <div class="nfc-label">Consultar saldo</div>
-      <div class="nfc-sub">Acerca la pulsera</div>
-      <button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button>
-    </div>
-    <div id="bal-result" style="display:none"></div>
-  </div>`;
-}
-
-async function onBalanceScan(uid){
-  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).maybeSingle();
-  if(!wb){toast('Pulsera no registrada');return;}
-  const{data:txs}=await _sb.from('rfid_transactions').select('*').eq('wristband_id',wb.id).order('created_at',{ascending:false}).limit(10);
-  const r=document.getElementById('bal-result');r.style.display='block';
-  r.innerHTML=`<div class="card mb16" style="text-align:center;padding:30px">
-    <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${wb.holder_name||'Sin nombre'}</div>
-    <div class="balance-big">${fmt(wb.balance)}€</div>
-    <div class="balance-label">Saldo disponible</div>
-    <div style="display:flex;justify-content:center;gap:16px;margin-top:16px">
-      <div><span style="font-size:11px;color:var(--muted)">Recargado</span><div style="font-family:Syne;font-weight:700;color:var(--success)">${fmt(wb.total_loaded)}€</div></div>
-      <div><span style="font-size:11px;color:var(--muted)">Gastado</span><div style="font-family:Syne;font-weight:700;color:var(--a2)">${fmt(wb.total_spent)}€</div></div>
-    </div>
-  </div>
-  <div class="card"><div class="card-title">Últimos movimientos</div>
-    ${(!txs||!txs.length)?'<div style="color:var(--muted);font-size:13px;text-align:center;padding:12px">Sin movimientos</div>'
-    :`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th></tr></thead><tbody>${txs.map(t=>`<tr><td style="font-size:12px;color:var(--muted)">${fmtDate(t.created_at)}</td><td><span class="badge ${t.type==='topup'?'b-green':'b-red'}">${t.type==='topup'?'Recarga':'Compra'}</span></td><td style="font-size:13px">${t.description||'—'}</td><td style="font-weight:600;color:${t.amount>=0?'var(--success)':'var(--danger)'}">${t.amount>=0?'+':''}${fmt(t.amount)}€</td></tr>`).join('')}</tbody></table></div>`}
-  </div>`;
-  document.getElementById('bal-nfc-ring').className='nfc-ring success';
-}
-
-// ════════════════════════════════════════
-//  TRANSACTIONS
-// ════════════════════════════════════════
-async function renderTransactions(pc){
-  pc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Cargando...</div>';
-  const{data}=await _sb.from('rfid_transactions').select('*, rfid_wristbands(holder_name,uid)').order('created_at',{ascending:false}).limit(100);
-  const txs=data||[];
-  pc.innerHTML=`<div class="card"><div class="card-title">Últimas transacciones (${txs.length})</div>
-    ${!txs.length?'<div style="color:var(--muted);text-align:center;padding:20px">Sin transacciones</div>'
-    :`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Pulsera</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Saldo</th><th>Operador</th></tr></thead><tbody>
-    ${txs.map(t=>`<tr>
-      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${fmtDate(t.created_at)}</td>
-      <td style="font-size:12px">${t.rfid_wristbands?.holder_name||t.rfid_wristbands?.uid||'—'}</td>
-      <td><span class="badge ${t.type==='topup'?'b-green':'b-red'}">${t.type}</span></td>
-      <td style="font-size:13px">${t.description||'—'}</td>
-      <td style="font-weight:600;color:${t.amount>=0?'var(--success)':'var(--danger)'}">${t.amount>=0?'+':''}${fmt(t.amount)}€</td>
-      <td style="font-size:12px;color:var(--muted)">${fmt(t.balance_after)}€</td>
-      <td style="font-size:12px;color:var(--muted)">${t.operator||'—'}</td>
-    </tr>`).join('')}
-    </tbody></table></div>`}
-  </div>`;
-}
-
-// ════════════════════════════════════════
-//  DASHBOARD
-// ════════════════════════════════════════
-async function renderDashboard(pc){
-  pc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Cargando...</div>';
-  const eid=selectedEvent?.id;
-  const[wR,tR,aR]=await Promise.all([
-    _sb.from('rfid_wristbands').select('balance,status').eq('event_id',eid),
-    _sb.from('rfid_transactions').select('type,amount').eq('event_id',eid),
-    _sb.from('rfid_access_log').select('direction').eq('event_id',eid)
-  ]);
-  const wbs=wR.data||[],txs=tR.data||[],accs=aR.data||[];
-  const totalBal=wbs.reduce((s,w)=>s+parseFloat(w.balance||0),0);
-  const activeWB=wbs.filter(w=>w.status==='active').length;
-  const totalTop=txs.filter(t=>t.type==='topup').reduce((s,t)=>s+parseFloat(t.amount),0);
-  const totalPur=txs.filter(t=>t.type==='purchase').reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
-  const inside=Math.max(0,accs.filter(a=>a.direction==='in').length-accs.filter(a=>a.direction==='out').length);
-  pc.innerHTML=`
-    <div class="g3 mb24">
-      <div class="card" style="text-align:center"><div class="stat-lbl">Saldo en circulación</div><div class="stat-val" style="color:var(--a1)">${fmt(totalBal)}€</div></div>
-      <div class="card" style="text-align:center"><div class="stat-lbl">Total recargado</div><div class="stat-val" style="color:var(--success)">${fmt(totalTop)}€</div></div>
-      <div class="card" style="text-align:center"><div class="stat-lbl">Total consumido</div><div class="stat-val" style="color:var(--a2)">${fmt(totalPur)}€</div></div>
-    </div>
-    <div class="g3 mb24">
-      <div class="card" style="text-align:center"><div class="stat-lbl">Pulseras activas</div><div class="stat-val" style="color:var(--a3)">${activeWB}</div></div>
-      <div class="card" style="text-align:center"><div class="stat-lbl">Transacciones</div><div class="stat-val">${txs.length}</div></div>
-      <div class="card" style="text-align:center"><div class="stat-lbl">Aforo actual</div><div class="stat-val" style="color:var(--warn)">${inside}</div></div>
-    </div>`;
-}
-
-// ════════════════════════════════════════
-//  PRODUCTS — sin prompt nativo
-// ════════════════════════════════════════
-async function renderProducts(pc){
+async function submitEditProduct(id){
+  const nombre = document.getElementById('ep-nombre')?.value?.trim();
+  const precio = parseFloat(document.getElementById('ep-precio')?.value)||0;
+  const stock  = parseInt(document.getElementById('ep-stock')?.value)||0;
+  const cat    = document.getElementById('ep-cat')?.value;
+  const activo = document.getElementById('ep-activo-val')?.value==='true';
+  const err    = document.getElementById('modal-err');
+  if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
+  const btn = document.querySelector('#modal-box .btn-p');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const{error}=await _sb.from('rfid_products')
+    .update({name:nombre, price:precio, stock:stock, category:cat, active:activo})
+    .eq('id',id);
+  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Guardar';} return; }
+  closeModal();
+  toast('Producto actualizado ✓');
   await loadProducts();
-  pc.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
-    <div style="font-family:Syne;font-weight:700;font-size:20px">${posProducts.length} productos</div>
-    <button class="btn btn-p" onclick="modalAddProduct()">+ Añadir producto</button>
-  </div>
-  ${!posProducts.length
-    ?`<div class="card" style="text-align:center;padding:40px">
-        <div style="font-size:48px;margin-bottom:12px">🏷️</div>
-        <div style="color:var(--muted);margin-bottom:16px">Sin productos. Añade el primero.</div>
-        <button class="btn btn-p" onclick="modalAddProduct()">+ Añadir primer producto</button>
-      </div>`
-    :`<div class="card"><div class="tbl-wrap"><table>
-        <thead><tr><th>Nombre</th><th>Precio</th><th>Categoría</th><th></th></tr></thead>
-        <tbody>${posProducts.map(p=>`<tr>
-          <td style="font-weight:500">${p.name}</td>
-          <td style="color:var(--a1);font-weight:600">${fmt(p.price)}€</td>
-          <td style="color:var(--muted)">${p.category||'—'}</td>
-          <td><button class="btn btn-danger" style="padding:6px 12px;font-size:12px;min-height:36px" onclick="confirmDeleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">✕ Eliminar</button></td>
-        </tr>`).join('')}
-        </tbody></table></div></div>`}`;
+  renderProducts(document.getElementById('page-content'));
 }
 
+// ── Confirmar eliminar — solo en este evento ───────────────────────────────
 function confirmDeleteProduct(id, name){
-  // Modal de confirmación en vez de confirm() nativo
   document.getElementById('modal-box').innerHTML=`
-    <div class="modal-title">🗑️ Eliminar producto</div>
-    <div class="modal-sub">¿Seguro que quieres eliminar <strong style="color:var(--txt)">${name}</strong>? No se puede deshacer.</div>
-    <div style="display:flex;gap:10px;margin-top:8px">
+    <div class="modal-title">🗑️ Eliminar de este evento</div>
+    <div class="modal-sub">¿Eliminar <strong style="color:var(--txt)">${name}</strong> de <strong style="color:var(--a3)">${selectedEvent?.nombre||'este evento'}</strong>?</div>
+    <div style="padding:10px 14px;background:rgba(255,171,0,.07);border:1px solid rgba(255,171,0,.2);border-radius:8px;font-size:12px;color:var(--warn);margin-bottom:16px">
+      ⚠️ Solo se elimina la instancia de este evento. El producto sigue en el catálogo global y en los demás eventos.
+    </div>
+    <div style="display:flex;gap:10px">
       <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-danger" style="flex:2" onclick="deleteProduct('${id}')">Sí, eliminar</button>
+      <button class="btn btn-danger" style="flex:2" onclick="deleteProduct('${id}')">Eliminar aquí</button>
     </div>`;
   document.getElementById('modal-overlay').classList.add('show');
 }
@@ -1063,11 +832,12 @@ function confirmDeleteProduct(id, name){
 async function deleteProduct(id){
   closeModal();
   const{error}=await _sb.from('rfid_products').delete().eq('id',id);
-  if(error){toast('Error: '+error.message);return;}
-  toast('Producto eliminado');
+  if(error){ toast('Error: '+error.message); return; }
+  toast('Eliminado de este evento');
   await loadProducts();
   renderProducts(document.getElementById('page-content'));
 }
+
 
 // ════════════════════════════════════════
 //  CONFIG
