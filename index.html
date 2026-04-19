@@ -859,7 +859,7 @@ async function syncCatalogToEvent(eventId){
     const existingIds=new Set((existing||[]).map(p=>p.catalog_id).filter(Boolean));
     const missing=(catalog||[]).filter(c=>!existingIds.has(c.id));
     if(!missing.length) return;
-    await _sb.from('rfid_products').insert(
+    await _sb.from('rfid_products').upsert(
       missing.map((c,i)=>({
         event_id:   eventId,
         catalog_id: c.id,
@@ -869,7 +869,8 @@ async function syncCatalogToEvent(eventId){
         stock:      0,
         active:     false,
         sort_order: i,
-      }))
+      })),
+      {onConflict:'event_id,catalog_id', ignoreDuplicates:true}
     );
   } catch(e) {
     // Tabla catálogo no existe — no hacer nada, funcionar con rfid_products directo
@@ -1035,13 +1036,14 @@ async function submitAddCatalogProduct(){
     if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return;
   }
 
-  // 2. Crear instancia inactiva en TODOS los eventos existentes
+  // 2. Crear instancia inactiva en todos los eventos existentes
+  // Usamos upsert con ignoreDuplicates para evitar duplicados si el trigger SQL ya actuó
   const{data:eventos}=await _sb.from('events').select('id')
     .in('estado',['publicado','confirmado','produccion','borrador','finalizado']);
   const eventosIds=(eventos||[]).map(e=>e.id);
 
   if(eventosIds.length){
-    await _sb.from('rfid_products').insert(
+    await _sb.from('rfid_products').upsert(
       eventosIds.map((eid,i)=>({
         event_id:   eid,
         catalog_id: catItem.id,
@@ -1049,9 +1051,10 @@ async function submitAddCatalogProduct(){
         category:   cat,
         price:      precio,
         stock:      0,
-        active:     false,    // siempre inactivo por defecto
+        active:     false,
         sort_order: 9999+i,
-      }))
+      })),
+      {onConflict:'event_id,catalog_id', ignoreDuplicates:true}
     );
   }
 
@@ -1308,25 +1311,54 @@ async function onAccessScan(uid){
   const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).maybeSingle();
   if(!wb){showAccessResult(false,'NO REGISTRADA','UID: '+uid);return;}
   if(wb.status!=='active'){showAccessResult(false,'BLOQUEADA',wb.holder_name||uid);return;}
-  const{data:lastLog}=await _sb.from('rfid_access_log').select('direction').eq('wristband_id',wb.id).eq('event_id',selectedEvent?.id).order('created_at',{ascending:false}).limit(1).maybeSingle();
-  const dir=(!lastLog||lastLog.direction==='out')?'in':'out';
-  await _sb.from('rfid_access_log').insert({wristband_id:wb.id,event_id:selectedEvent?.id,direction:dir,gate:'Principal',operator:userProfile.nombre});
-  showAccessResult(true,dir==='in'?'✅ ENTRADA':'🔵 SALIDA',wb.holder_name||uid,wb.balance);
+
+  // Obtener TODOS los registros de esta pulsera en este evento
+  const{data:logs}=await _sb.from('rfid_access_log')
+    .select('direction,created_at')
+    .eq('wristband_id',wb.id)
+    .eq('event_id',selectedEvent?.id)
+    .order('created_at',{ascending:true});
+
+  const entradas=(logs||[]).filter(l=>l.direction==='in').length;
+  const salidas =(logs||[]).filter(l=>l.direction==='out').length;
+
+  // Lógica: 1 entrada + 1 salida máximo por evento
+  if(entradas>=1 && salidas>=1){
+    // Ciclo completo — no permitir más
+    showAccessResult(false,'YA REGISTRADA',wb.holder_name||uid);
+    return;
+  }
+
+  // Si ya entró pero aún no salió → registrar salida
+  // Si no ha entrado → registrar entrada
+  const dir = entradas===0 ? 'in' : 'out';
+
+  await _sb.from('rfid_access_log').insert({
+    wristband_id:wb.id,
+    event_id:selectedEvent?.id,
+    direction:dir,
+    gate:'Principal',
+    operator:userProfile.nombre
+  });
+
+  showAccessResult(true, dir==='in'?'✅ ENTRADA':'🔵 SALIDA', wb.holder_name||uid, wb.balance);
   setTimeout(()=>loadAccessStats(),500);
 }
 
 function showAccessResult(ok,title,name='',balance=null){
   const d=document.createElement('div');
-  d.className='access-full '+(ok?'granted':'denied');
+  const isWarn = title.includes('YA REGISTRADA');
+  d.className='access-full '+(isWarn?'warn-screen':ok?'granted':'denied');
   d.innerHTML=`
-    <div style="font-size:80px">${ok?(title.includes('ENTRADA')?'🟢':'🔵'):'🔴'}</div>
-    <div class="access-text" style="color:${ok?(title.includes('ENTRADA')?'var(--success)':'var(--a3)'):'var(--danger)'}">${title}</div>
+    <div style="font-size:80px">${isWarn?'⚠️':ok?(title.includes('ENTRADA')?'🟢':'🔵'):'🔴'}</div>
+    <div class="access-text" style="color:${isWarn?'var(--warn)':ok?(title.includes('ENTRADA')?'var(--success)':'var(--a3)'):'var(--danger)'}">${title}</div>
     <div class="access-sub">${name}</div>
-    ${balance!==null?`<div class="access-balance">Saldo: ${fmt(balance)}€</div>`:''}`;
+    ${isWarn?'<div class="access-sub" style="margin-top:8px;font-size:14px">Esta pulsera ya completó entrada y salida en este evento</div>':''}
+    ${!isWarn&&balance!==null?`<div class="access-balance">Saldo: ${fmt(balance)}€</div>`:''}`;
   d.onclick=()=>d.remove();
   document.body.appendChild(d);
-  if(navigator.vibrate) navigator.vibrate(ok?100:[200,100,200]);
-  setTimeout(()=>d.remove(),2800);
+  if(navigator.vibrate) navigator.vibrate(isWarn?[100,50,100]:ok?100:[200,100,200]);
+  setTimeout(()=>d.remove(), isWarn?3500:2800);
 }
 
 // ════════════════════════════════════════
