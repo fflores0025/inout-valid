@@ -1263,17 +1263,33 @@ function renderAccess(pc){
       <div class="acc-stat"><div class="val" id="acc-entries" style="color:var(--a3)">—</div><div class="lbl">Entradas hoy</div></div>
       <div class="acc-stat"><div class="val" id="acc-exits" style="color:var(--muted)">—</div><div class="lbl">Salidas hoy</div></div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 0 10px">
-      <div class="nfc-ring scanning" style="width:200px;height:200px" id="acc-ring">
-        <span class="emoji" style="font-size:64px">🚪</span>
-      </div>
-      <div class="nfc-label" style="margin-top:20px;font-size:22px">Control de Acceso</div>
-      <div class="nfc-sub" style="font-size:15px" id="acc-sub">Acerca la pulsera al lector</div>
-      <button class="btn btn-g" style="margin-top:20px" onclick="manualUIDInput()">UID manual</button>
+
+    <!-- 🔥 SELECTOR -->
+    <div style="display:flex;gap:10px;justify-content:center;margin-bottom:20px">
+      <button class="btn btn-g" onclick="setMode('rfid')">📡 RFID</button>
+      <button class="btn btn-g" onclick="setMode('qr')">📷 QR</button>
     </div>
-    <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:8px">
-      <div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Sin registros recientes</div>
-    </div>`;
+
+    <!-- RFID -->
+    <div id="rfid-mode">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <div class="nfc-ring scanning" style="width:200px;height:200px" id="acc-ring">
+          <span class="emoji" style="font-size:64px">🚪</span>
+        </div>
+        <div class="nfc-label" style="margin-top:20px;font-size:22px">Control RFID</div>
+        <div class="nfc-sub">Acerca la pulsera</div>
+      </div>
+    </div>
+
+    <!-- QR -->
+    <div id="qr-mode" style="display:none;text-align:center">
+      <video id="qr-video" style="width:100%;max-width:400px;border-radius:12px"></video>
+      <button class="btn btn-g" style="margin-top:12px" onclick="startQR()">Activar cámara</button>
+    </div>
+
+    <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:20px"></div>
+  `;
+
   loadAccessStats();
 }
 
