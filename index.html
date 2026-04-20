@@ -9,6 +9,7 @@
   <title>InOut · RFID System</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
     :root{
@@ -212,7 +213,9 @@ let currentUser=null, userProfile=null, currentPage='pos';
 let selectedEvent=null, allEvents=[];
 let posProducts=[], posCart={}, allPOS=[];
 let nfcReader=null, nfcSupported=false, lastScannedUID=null;
-
+let scanMode = 'rfid';
+let qrScanner = null;
+  
 let _lastScanUID=null, _lastScanTS=0;
 function isDuplicateScan(uid){
   const now=Date.now();
@@ -512,7 +515,7 @@ function setMode(mode){
   scanMode = mode;
 
   document.getElementById('rfid-mode').style.display = mode === 'rfid' ? 'block' : 'none';
-  document.getElementById('qr-mode').style.display   = mode === 'qr' ? 'block' : 'block';
+  document.getElementById('qr-mode').style.display   = mode === 'qr' ? 'block' : 'none';
 
   if(mode === 'qr'){
     startQR();
@@ -533,7 +536,7 @@ function startQR(){
       console.log("QR leído:", decodedText);
 
       if(scanMode === 'qr'){
-        onAccessScan(decodedText); // 🔥 usa tu lógica actual
+        onAccessScan(decodedText);
       }
     },
     (error) => {}
@@ -1324,9 +1327,9 @@ function renderAccess(pc){
 
     <!-- QR -->
     <div id="qr-mode" style="display:none;text-align:center">
-      <video id="qr-video" style="width:100%;max-width:400px;border-radius:12px"></video>
-      <button class="btn btn-g" style="margin-top:12px" onclick="startQR()">Activar cámara</button>
-    </div>
+  <div id="qr-reader" style="width:300px;margin:0 auto;border-radius:12px;overflow:hidden"></div>
+  <button class="btn btn-g" style="margin-top:12px" onclick="startQR()">Activar cámara</button>
+</div>
 
     <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:20px"></div>
   `;
