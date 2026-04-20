@@ -500,7 +500,7 @@ function handleNFCScan(uid){
   if(currentPage==='pos')          onPOSScan(uid);
   else if(currentPage==='topup')   onTopupScan(uid);
   else if(currentPage==='register')onRegisterScan(uid);
-  else if(currentPage==='access')  onAccessScan(uid);
+  else if(currentPage==='access' && scanMode==='rfid')  onAccessScan(uid);
   else if(currentPage==='balance') onBalanceScan(uid);
   else toast('UID: '+uid);
 }
@@ -508,6 +508,47 @@ function handleNFCScan(uid){
 // ── UID manual — ahora usa modal integrado ──
 function manualUIDInput(){ modalManualUID(); }
 
+function setMode(mode){
+  scanMode = mode;
+
+  document.getElementById('rfid-mode').style.display = mode === 'rfid' ? 'block' : 'none';
+  document.getElementById('qr-mode').style.display   = mode === 'qr' ? 'block' : 'block';
+
+  if(mode === 'qr'){
+    startQR();
+  } else {
+    stopQR();
+  }
+}
+
+function startQR(){
+  if(qrScanner) return;
+
+  qrScanner = new Html5Qrcode("qr-reader");
+
+  qrScanner.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: 250 },
+    (decodedText) => {
+      console.log("QR leído:", decodedText);
+
+      if(scanMode === 'qr'){
+        onAccessScan(decodedText); // 🔥 usa tu lógica actual
+      }
+    },
+    (error) => {}
+  );
+}
+
+function stopQR(){
+  if(qrScanner){
+    qrScanner.stop().then(()=>{
+      qrScanner.clear();
+      qrScanner = null;
+    }).catch(()=>{});
+  }
+}
+  
 // ════════════════════════════════════════
 //  POS
 // ════════════════════════════════════════
