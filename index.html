@@ -9,7 +9,6 @@
   <title>InOut · RFID System</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
     :root{
@@ -205,6 +204,96 @@
 </div>
 <div id="overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:250" onclick="closeSidebar()"></div>
 <script>
+// ══════════════════════════════════════════════════════════════════
+//  MÓDULO PIN DE DISPOSITIVO — se inyecta en Staff/Register/Kiosk/Valid
+//  PIN se pide UNA sola vez por sesión de app (hasta cerrar pestaña)
+//  Se guarda en sessionStorage (se borra al cerrar) NO en localStorage
+// ══════════════════════════════════════════════════════════════════
+const DEVICE_PIN = '1234'; // ← cambiar en producción
+const _DEVICE_PIN_KEY = 'inout_device_unlocked';
+
+function isDeviceUnlocked(){
+  return sessionStorage.getItem(_DEVICE_PIN_KEY) === 'yes';
+}
+
+function lockDevice(){
+  sessionStorage.removeItem(_DEVICE_PIN_KEY);
+}
+
+// Muestra la pantalla de PIN bloqueando toda la UI hasta que sea correcto
+// onUnlock: función a llamar cuando el PIN sea correcto
+function showDeviceLockScreen(appName, appIcon, onUnlock){
+  // Si ya está desbloqueado, ir directo
+  if(isDeviceUnlocked()){ onUnlock(); return; }
+
+  let _buf = '';
+  const overlay = document.createElement('div');
+  overlay.id = 'device-lock-overlay';
+  overlay.style.cssText = `
+    position:fixed;inset:0;z-index:9999;
+    background:var(--bg,#07070f);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:0;padding:24px;font-family:'DM Sans',sans-serif;
+  `;
+  overlay.innerHTML = `
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-size:52px;margin-bottom:10px">${appIcon}</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:#e6e6f0">
+        InOut<span style="color:#c8ff00">.</span>
+      </div>
+      <div style="font-size:11px;color:#60607a;text-transform:uppercase;letter-spacing:2px;margin-top:3px">${appName}</div>
+    </div>
+    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:600;color:#e6e6f0;margin-bottom:4px">PIN de dispositivo</div>
+    <div style="font-size:13px;color:#60607a;margin-bottom:20px">Introduce el PIN para desbloquear</div>
+    <div id="dl-dots" style="display:flex;gap:14px;justify-content:center;margin-bottom:24px">
+      ${[0,1,2,3].map(i=>`<div id="dld${i}" style="width:14px;height:14px;border-radius:50%;border:2px solid #1c1c2e;transition:all .15s"></div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:280px">
+      ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>
+        k===''
+        ? '<div></div>'
+        : `<div id="dlk-${k}" style="padding:18px;border-radius:14px;background:#0d0d1a;border:1px solid #1c1c2e;
+               font-family:'Syne',sans-serif;font-size:24px;font-weight:700;color:#e6e6f0;
+               text-align:center;cursor:pointer;user-select:none;transition:background .1s" 
+               onclick="dlKey('${k}')">${k}</div>`
+      ).join('')}
+    </div>
+    <div id="dl-err" style="height:18px;margin-top:14px;font-size:13px;color:#ff1744;text-align:center"></div>
+  `;
+  document.body.appendChild(overlay);
+
+  window.dlKey = function(k){
+    if(k==='⌫'){ _buf=_buf.slice(0,-1); }
+    else if(_buf.length<4){ _buf+=k; }
+    // Actualizar dots
+    for(let i=0;i<4;i++){
+      const d=document.getElementById('dld'+i);
+      if(d){ d.style.background=i<_buf.length?'#c8ff00':'transparent'; d.style.borderColor=i<_buf.length?'#c8ff00':'#1c1c2e'; }
+    }
+    if(_buf.length===4){
+      setTimeout(()=>{
+        if(_buf===DEVICE_PIN){
+          sessionStorage.setItem(_DEVICE_PIN_KEY,'yes');
+          overlay.style.transition='opacity .3s';
+          overlay.style.opacity='0';
+          setTimeout(()=>{ overlay.remove(); delete window.dlKey; onUnlock(); }, 300);
+        } else {
+          _buf='';
+          for(let i=0;i<4;i++){const d=document.getElementById('dld'+i);if(d){d.style.background='transparent';d.style.borderColor='#ff1744';}}
+          document.getElementById('dl-err').textContent='PIN incorrecto';
+          // Shake
+          overlay.style.transition='transform .08s';
+          overlay.style.transform='translateX(10px)';
+          setTimeout(()=>overlay.style.transform='translateX(-10px)',80);
+          setTimeout(()=>overlay.style.transform='translateX(5px)',160);
+          setTimeout(()=>{overlay.style.transform='translateX(0)';for(let i=0;i<4;i++){const d=document.getElementById('dld'+i);if(d)d.style.borderColor='#1c1c2e';}},240);
+          setTimeout(()=>document.getElementById('dl-err').textContent='',2000);
+        }
+      },150);
+    }
+  };
+}
+
 const SB_URL = 'https://raoxkjnwrccoxjcipfpv.supabase.co';
 const SB_KEY = 'sb_publishable__-K1pC4bOJHRf8JQ__OOzg_jqLxlGla';
 const _sb    = supabase.createClient(SB_URL, SB_KEY);
@@ -213,9 +302,7 @@ let currentUser=null, userProfile=null, currentPage='pos';
 let selectedEvent=null, allEvents=[];
 let posProducts=[], posCart={}, allPOS=[];
 let nfcReader=null, nfcSupported=false, lastScannedUID=null;
-let scanMode = 'rfid';
-let qrScanner = null;
-  
+
 let _lastScanUID=null, _lastScanTS=0;
 function isDuplicateScan(uid){
   const now=Date.now();
@@ -498,20 +585,12 @@ async function initNFC(){
 
 function handleNFCScan(uid){
   if(isDuplicateScan(uid)) return;
-
-  lastScannedUID = uid;
-
+  lastScannedUID=uid;
   if(navigator.vibrate) navigator.vibrate(100);
-
-  // 🔥 SOLO en acceso usamos QR + RFID
-  if(currentPage === 'access'){
-    return handleAccessInput(uid);
-  }
-
-  // resto normal
   if(currentPage==='pos')          onPOSScan(uid);
   else if(currentPage==='topup')   onTopupScan(uid);
   else if(currentPage==='register')onRegisterScan(uid);
+  else if(currentPage==='access')  onAccessScan(uid);
   else if(currentPage==='balance') onBalanceScan(uid);
   else toast('UID: '+uid);
 }
@@ -519,47 +598,6 @@ function handleNFCScan(uid){
 // ── UID manual — ahora usa modal integrado ──
 function manualUIDInput(){ modalManualUID(); }
 
-function setMode(mode){
-  scanMode = mode;
-
-  document.getElementById('rfid-mode').style.display = mode === 'rfid' ? 'block' : 'none';
-  document.getElementById('qr-mode').style.display   = mode === 'qr' ? 'block' : 'none';
-
-  if(mode === 'qr'){
-    startQR();
-  } else {
-    stopQR();
-  }
-}
-
-function startQR(){
-  if(qrScanner) return;
-
-  qrScanner = new Html5Qrcode("qr-reader");
-
-  qrScanner.start(
-    { facingMode: "environment" },
-    { fps: 10, qrbox: 250 },
-    (decodedText) => {
-      console.log("QR leído:", decodedText);
-
-      if(scanMode === 'qr'){
-        onAccessScan(decodedText);
-      }
-    },
-    (error) => {}
-  );
-}
-
-function stopQR(){
-  if(qrScanner){
-    qrScanner.stop().then(()=>{
-      qrScanner.clear();
-      qrScanner = null;
-    }).catch(()=>{});
-  }
-}
-  
 // ════════════════════════════════════════
 //  POS
 // ════════════════════════════════════════
@@ -1315,33 +1353,17 @@ function renderAccess(pc){
       <div class="acc-stat"><div class="val" id="acc-entries" style="color:var(--a3)">—</div><div class="lbl">Entradas hoy</div></div>
       <div class="acc-stat"><div class="val" id="acc-exits" style="color:var(--muted)">—</div><div class="lbl">Salidas hoy</div></div>
     </div>
-
-    <!-- 🔥 SELECTOR -->
-    <div style="display:flex;gap:10px;justify-content:center;margin-bottom:20px">
-      <button class="btn btn-g" onclick="setMode('rfid')">📡 RFID</button>
-      <button class="btn btn-g" onclick="setMode('qr')">📷 QR</button>
-    </div>
-
-    <!-- RFID -->
-    <div id="rfid-mode">
-      <div style="display:flex;flex-direction:column;align-items:center">
-        <div class="nfc-ring scanning" style="width:200px;height:200px" id="acc-ring">
-          <span class="emoji" style="font-size:64px">🚪</span>
-        </div>
-        <div class="nfc-label" style="margin-top:20px;font-size:22px">Control RFID</div>
-        <div class="nfc-sub">Acerca la pulsera</div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 0 10px">
+      <div class="nfc-ring scanning" style="width:200px;height:200px" id="acc-ring">
+        <span class="emoji" style="font-size:64px">🚪</span>
       </div>
+      <div class="nfc-label" style="margin-top:20px;font-size:22px">Control de Acceso</div>
+      <div class="nfc-sub" style="font-size:15px" id="acc-sub">Acerca la pulsera al lector</div>
+      <button class="btn btn-g" style="margin-top:20px" onclick="manualUIDInput()">UID manual</button>
     </div>
-
-    <!-- QR -->
-    <div id="qr-mode" style="display:none;text-align:center">
-  <div id="qr-reader" style="width:300px;margin:0 auto;border-radius:12px;overflow:hidden"></div>
-  <button class="btn btn-g" style="margin-top:12px" onclick="startQR()">Activar cámara</button>
-</div>
-
-    <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:20px"></div>
-  `;
-
+    <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:8px">
+      <div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Sin registros recientes</div>
+    </div>`;
   loadAccessStats();
 }
 
@@ -1592,12 +1614,17 @@ function hideResult(){document.getElementById('result-overlay')?.remove();}
 //  AUTO-LOGIN
 // ════════════════════════════════════════
 (async function(){
-  const{data:{session}}=await _sb.auth.getSession();
-  if(session?.user){
-    currentUser=session.user;
-    const{data:p}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
-    if(p){userProfile={nombre:p.nombre,role:p.role,email:p.email,id:p.id};enterApp();}
-  }
+  showDeviceLockScreen('RFID System','📡', async()=>{
+    const{data:{session}}=await _sb.auth.getSession();
+    if(session?.user){
+      currentUser=session.user;
+      const{data:p}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
+      if(p){userProfile={nombre:p.nombre,role:p.role,email:p.email,id:p.id};enterApp();}
+      else{ document.getElementById('login-screen').style.display='flex'; }
+    } else {
+      document.getElementById('login-screen').style.display='flex';
+    }
+  });
 })();
 </script>
 </body>
