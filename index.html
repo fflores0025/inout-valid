@@ -1626,6 +1626,64 @@ function hideResult(){document.getElementById('result-overlay')?.remove();}
     }
   });
 })();
+
+  <!-- Añadir al final del <body>, antes de </body> -->
+<script src="lib/device-manager.js"></script>
+<script>
+  // Auto-configuración del POS
+  let deviceManager = null
+
+  async function initDeviceManager() {
+    try {
+      deviceManager = new InOutDeviceManager({
+        deviceType: 'pos',
+        appVersion: '1.2.0', // Tu versión actual
+        supabaseClient: _sb, // Cliente Supabase que ya tienes
+        
+        onConfigLoaded: async (device) => {
+          console.log('📱 POS configurado:', device)
+          
+          // Auto-cargar evento asignado
+          if (device.event_id) {
+            const { data: event } = await _sb
+              .from('events')
+              .select('*')
+              .eq('id', device.event_id)
+              .single()
+            
+            if (event) {
+              selectedEvent = event
+              console.log(`🎪 Evento asignado: ${event.name}`)
+            }
+          }
+          
+          // Aplicar ubicación
+          if (device.location) {
+            document.title = `POS - ${device.location}`
+          }
+        },
+        
+        onCommandReceived: async (cmd, result) => {
+          console.log('📥 Comando ejecutado:', cmd.command)
+          alert(`Comando remoto ejecutado: ${cmd.command}`)
+        }
+      })
+      
+      await deviceManager.initialize()
+      console.log('✅ Device Manager iniciado')
+      
+    } catch (error) {
+      console.error('❌ Error Device Manager:', error)
+    }
+  }
+
+  // Iniciar cuando esté listo
+  window.addEventListener('DOMContentLoaded', async () => {
+    await new Promise(r => setTimeout(r, 1000))
+    await initDeviceManager()
+  })
+  
+</script>
 </script>
 </body>
 </html>
