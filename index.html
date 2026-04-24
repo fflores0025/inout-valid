@@ -1627,262 +1627,60 @@ function hideResult(){document.getElementById('result-overlay')?.remove();}
   });
 })();
 
+</script>
+
 <!-- ========================================== -->
 <!-- SISTEMA MDM - DEVICE MANAGER -->
 <!-- ========================================== -->
 <script src="lib/device-manager.js"></script>
 <script>
- <!-- Añadir al final del <body>, antes de </body> -->
-<script src="lib/device-manager.js"></script>
-<script>
-  // Auto-configuración del POS
-  let deviceManager = null
+let deviceManager = null
 
-  async function initDeviceManager() {
-    try {
-      deviceManager = new InOutDeviceManager({
-        deviceType: 'pos',
-        appVersion: '1.2.0', // Tu versión actual
-        supabaseClient: _sb, // Cliente Supabase que ya tienes
+async function initDeviceManager() {
+  try {
+    deviceManager = new InOutDeviceManager({
+      deviceType: 'pos',
+      appVersion: '1.2.0',
+      supabaseClient: _sb,
+      
+      onConfigLoaded: async (device) => {
+        console.log('📱 POS configurado:', device)
         
-        onConfigLoaded: async (device) => {
-          console.log('📱 POS configurado:', device)
+        if (device.event_id) {
+          const { data: event } = await _sb
+            .from('events')
+            .select('*')
+            .eq('id', device.event_id)
+            .single()
           
-          // Auto-cargar evento asignado
-          if (device.event_id) {
-            const { data: event } = await _sb
-              .from('events')
-              .select('*')
-              .eq('id', device.event_id)
-              .single()
-            
-            if (event) {
-              selectedEvent = event
-              console.log(`🎪 Evento asignado: ${event.name}`)
-            }
+          if (event) {
+            selectedEvent = event
+            document.getElementById('tb-event').textContent = event.nombre
           }
-          
-          // Aplicar ubicación
-          if (device.location) {
-            document.title = `POS - ${device.location}`
-          }
-          
-          // Aplicar configuración personalizada
-          if (device.config) {
-            // Tema
-            if (device.config.theme === 'light') {
-              document.body.classList.add('light-theme')
-            }
-            
-            // Límites personalizados
-            if (device.config.max_products) {
-              // Si tienes una variable global de límite de productos
-              // MAX_PRODUCTS_IN_CART = device.config.max_products
-            }
-          }
-        },
+        }
         
-        onCommandReceived: async (cmd, result) => {
-          console.log('📥 Comando ejecutado:', cmd.command, result)
-          
-          // Mostrar notificación al operador
-          showToast(`Comando remoto: ${cmd.command}`, 'info')
+        if (device.location) {
+          document.title = `POS - ${device.location}`
         }
-      })
+      },
       
-      await deviceManager.initialize()
-      console.log('✅ Device Manager iniciado correctamente')
-      
-    } catch (error) {
-      console.error('❌ Error al inicializar Device Manager:', error)
-      // Continuar funcionamiento normal sin MDM
-    }
-  }
-
-  // ============================================
-  // FUNCIONES AUXILIARES
-  // ============================================
-
-  // Mostrar toast de notificación
-  function showToast(message, type = 'info') {
-    const toast = document.createElement('div')
-    toast.className = `toast toast-${type}`
-    toast.textContent = message
-    document.body.appendChild(toast)
-    
-    setTimeout(() => {
-      toast.classList.add('show')
-    }, 100)
-    
-    setTimeout(() => {
-      toast.classList.remove('show')
-      setTimeout(() => toast.remove(), 300)
-    }, 3000)
-  }
-
-  // ============================================
-  // SOBRESCRIBIR MÉTRICAS ESPECÍFICAS DE POS
-  // ============================================
-
-  // Función para obtener saldo total en caché
-  InOutDeviceManager.prototype.getCachedBalance = function() {
-    try {
-      let total = 0
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (key && key.startsWith('wb_balance_')) {
-          total += parseFloat(localStorage.getItem(key) || '0')
-        }
+      onCommandReceived: async (cmd, result) => {
+        toast(`Comando: ${cmd.command}`)
       }
-      return total
-    } catch {
-      return 0
-    }
-  }
-
-  // Función para contar transacciones pendientes de sincronizar
-  InOutDeviceManager.prototype.getPendingSyncsCount = function() {
-    try {
-      const pending = JSON.parse(localStorage.getItem('pending_transactions') || '[]')
-      return pending.length
-    } catch {
-      return 0
-    }
-  }
-
-  // ============================================
-  // FUNCIÓN GLOBAL PARA SINCRONIZACIÓN FORZADA
-  // ============================================
-
-  window.forceSyncNow = async function() {
-    console.log('🔄 Sincronización forzada iniciada...')
+    })
     
-    try {
-      const pending = JSON.parse(localStorage.getItem('pending_transactions') || '[]')
-      
-      if (pending.length === 0) {
-        console.log('✅ No hay transacciones pendientes')
-        return
-      }
-      
-      for (const tx of pending) {
-        try {
-          await _sb.from('rfid_transactions').insert(tx)
-          console.log('✅ Transacción sincronizada:', tx.id)
-        } catch (error) {
-          console.error('❌ Error al sincronizar transacción:', error)
-        }
-      }
-      
-      // Limpiar cola
-      localStorage.removeItem('pending_transactions')
-      
-      if (deviceManager) {
-        await deviceManager.log('info', 'Sincronización forzada completada', {
-          synced: pending.length
-        })
-      }
-      
-      showToast(`✅ ${pending.length} transacciones sincronizadas`, 'success')
-      
-    } catch (error) {
-      console.error('❌ Error en sincronización forzada:', error)
-      showToast('❌ Error en sincronización', 'error')
-    }
-  }
-
-  // ============================================
-  // LOGGING CENTRALIZADO
-  // ============================================
-
-  // Capturar errores no manejados
-  window.addEventListener('error', (event) => {
-    if (deviceManager) {
-      deviceManager.log('error', 'Error no capturado', {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno
-      })
-    }
-  })
-
-  // Capturar promesas rechazadas
-  window.addEventListener('unhandledrejection', (event) => {
-    if (deviceManager) {
-      deviceManager.log('error', 'Promise rechazada', {
-        reason: event.reason?.toString()
-      })
-    }
-  })
-
-  // ============================================
-  // INICIAR AL CARGAR LA APP
-  // ============================================
-
-  window.addEventListener('DOMContentLoaded', async () => {
-    // Esperar a que Supabase esté inicializado
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await deviceManager.initialize()
     
-    // Inicializar Device Manager
-    await initDeviceManager()
-  })
+  } catch (error) {
+    console.error('Error Device Manager:', error)
+  }
+}
 
-  // Cleanup al cerrar
-  window.addEventListener('beforeunload', () => {
-    if (deviceManager) {
-      deviceManager.destroy()
-    }
-  })
+window.addEventListener('DOMContentLoaded', async () => {
+  await new Promise(r => setTimeout(r, 1500))
+  await initDeviceManager()
+})
 </script>
 
-<!-- Estilos para toast de notificaciones -->
-<style>
-.toast {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  padding: 12px 20px;
-  border-radius: 8px;
-  color: white;
-  font-size: 14px;
-  font-weight: 500;
-  opacity: 0;
-  transform: translateY(20px);
-  transition: all 0.3s ease;
-  z-index: 10000;
-  max-width: 300px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-}
-
-.toast.show {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.toast-info { 
-  background: #00d4ff; 
-  color: #07070f; 
-}
-
-.toast-success { 
-  background: #c8ff00; 
-  color: #07070f; 
-}
-
-.toast-warning { 
-  background: #ff9800; 
-  color: #07070f; 
-}
-
-.toast-error { 
-  background: #ff3cac; 
-  color: white; 
-}
-</style>
-</script>
-  
-</script>
-</script>
 </body>
 </html>
