@@ -130,12 +130,21 @@
     #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 24px;font-size:14px;z-index:1000;transition:transform .3s;white-space:nowrap;font-weight:500;}
     #toast.show{transform:translateX(-50%) translateY(0);}
 
-    /* ── MODAL INTEGRADO ── */
+    /* ── MODAL INTEGRADO (reemplaza prompt/confirm nativos) ── */
     .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:900;align-items:center;justify-content:center;padding:16px;}
     .modal-overlay.show{display:flex;}
     .modal-box{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:28px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;}
     .modal-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:6px;}
     .modal-sub{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5;}
+
+    /* PIN pad dentro del modal */
+    .pin-dots{display:flex;gap:12px;justify-content:center;margin:16px 0;}
+    .pin-dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);transition:all .15s;}
+    .pin-dot.filled{background:var(--a1);border-color:var(--a1);}
+    .pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px;}
+    .pin-key{padding:16px;border-radius:12px;background:var(--surf);border:1px solid var(--border);font-family:'Syne',sans-serif;font-size:22px;font-weight:700;cursor:pointer;text-align:center;transition:background .1s;user-select:none;}
+    .pin-key:active{background:rgba(200,255,0,.1);}
+    .pin-key.empty{opacity:0;pointer-events:none;}
 
     @media(max-width:768px){
       .sidebar{position:fixed;left:0;top:0;height:100%;z-index:300;transform:translateX(-100%);transition:transform .25s;width:260px;}
@@ -148,12 +157,31 @@
       .topup-btn .amount{font-size:22px;}
     }
     @media(min-width:769px){.burger{display:none;}}
+    
+/* ══ ESTILOS TAQUILLA ══ */
+.taq-entrada-card{background:var(--card);border:2px solid var(--border);border-radius:14px;padding:16px;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;min-height:140px;position:relative;user-select:none;}
+.taq-entrada-card:not(.agotado):hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.2);}
+.taq-entrada-card:not(.agotado):active{transform:scale(.98);}
+.taq-entrada-card.agotado{opacity:.4;cursor:not-allowed;filter:grayscale(1);}
+.taq-agotado-badge{position:absolute;top:8px;right:8px;background:rgba(255,23,68,.15);color:var(--danger);padding:4px 10px;border-radius:6px;font-size:10px;font-weight:700;}
+.taq-stock-badge{position:absolute;top:8px;right:8px;background:rgba(255,171,0,.15);color:var(--warn);padding:4px 10px;border-radius:6px;font-size:10px;}
+.taq-cart-item{display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;}
+.taq-cart-item:hover{border-color:var(--a1);}
+.taq-qty-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surf);color:var(--txt);font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.taq-qty-btn:hover{border-color:var(--a1);background:rgba(200,255,0,.1);}
+.taq-qty-btn:active{transform:scale(.9);}
+.taq-payment-btn{padding:16px;border-radius:12px;border:2px solid var(--border);background:var(--card);text-align:center;cursor:pointer;user-select:none;}
+.taq-payment-btn:hover{border-color:var(--a1);}
+.taq-payment-btn.active{border-color:var(--a1);background:rgba(200,255,0,.1);}
+.taq-print-option{padding:20px;border-radius:14px;border:2px solid var(--border);background:var(--card);text-align:center;cursor:pointer;}
+.taq-print-option:hover{border-color:var(--a1);transform:translateY(-2px);}
+    
   </style>
 </head>
 <body>
 <div id="toast"></div>
 
-<!-- ══ MODAL UNIVERSAL ══ -->
+<!-- ══ MODAL UNIVERSAL (reemplaza prompt/confirm/alert) ══ -->
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal-box" id="modal-box"></div>
 </div>
@@ -194,17 +222,129 @@
   </div>
 </div>
 <div id="overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:250" onclick="closeSidebar()"></div>
-
 <script>
+// ══════════════════════════════════════════════════════════════════
+//  MÓDULO PIN DE DISPOSITIVO — se inyecta en Staff/Register/Kiosk/Valid
+//  PIN se pide UNA sola vez por sesión de app (hasta cerrar pestaña)
+//  Se guarda en sessionStorage (se borra al cerrar) NO en localStorage
+// ══════════════════════════════════════════════════════════════════
+const DEVICE_PIN = '1234'; // ← cambiar en producción
+const _DEVICE_PIN_KEY = 'inout_device_unlocked';
+
+function isDeviceUnlocked(){
+  return sessionStorage.getItem(_DEVICE_PIN_KEY) === 'yes';
+}
+
+function lockDevice(){
+  sessionStorage.removeItem(_DEVICE_PIN_KEY);
+}
+
+// Muestra la pantalla de PIN bloqueando toda la UI hasta que sea correcto
+// onUnlock: función a llamar cuando el PIN sea correcto
+function showDeviceLockScreen(appName, appIcon, onUnlock){
+  // Si ya está desbloqueado, ir directo
+  if(isDeviceUnlocked()){ onUnlock(); return; }
+
+  let _buf = '';
+  const overlay = document.createElement('div');
+  overlay.id = 'device-lock-overlay';
+  overlay.style.cssText = `
+    position:fixed;inset:0;z-index:9999;
+    background:var(--bg,#07070f);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:0;padding:24px;font-family:'DM Sans',sans-serif;
+  `;
+  overlay.innerHTML = `
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-size:52px;margin-bottom:10px">${appIcon}</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:22px;color:#e6e6f0">
+        InOut<span style="color:#c8ff00">.</span>
+      </div>
+      <div style="font-size:11px;color:#60607a;text-transform:uppercase;letter-spacing:2px;margin-top:3px">${appName}</div>
+    </div>
+    <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:600;color:#e6e6f0;margin-bottom:4px">PIN de dispositivo</div>
+    <div style="font-size:13px;color:#60607a;margin-bottom:20px">Introduce el PIN para desbloquear</div>
+    <div id="dl-dots" style="display:flex;gap:14px;justify-content:center;margin-bottom:24px">
+      ${[0,1,2,3].map(i=>`<div id="dld${i}" style="width:14px;height:14px;border-radius:50%;border:2px solid #1c1c2e;transition:all .15s"></div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:280px">
+      ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>
+        k===''
+        ? '<div></div>'
+        : `<div id="dlk-${k}" style="padding:18px;border-radius:14px;background:#0d0d1a;border:1px solid #1c1c2e;
+               font-family:'Syne',sans-serif;font-size:24px;font-weight:700;color:#e6e6f0;
+               text-align:center;cursor:pointer;user-select:none;transition:background .1s" 
+               onclick="dlKey('${k}')">${k}</div>`
+      ).join('')}
+    </div>
+    <div id="dl-err" style="height:18px;margin-top:14px;font-size:13px;color:#ff1744;text-align:center"></div>
+  `;
+  document.body.appendChild(overlay);
+
+  window.dlKey = function(k){
+    if(k==='⌫'){ _buf=_buf.slice(0,-1); }
+    else if(_buf.length<4){ _buf+=k; }
+    // Actualizar dots
+    for(let i=0;i<4;i++){
+      const d=document.getElementById('dld'+i);
+      if(d){ d.style.background=i<_buf.length?'#c8ff00':'transparent'; d.style.borderColor=i<_buf.length?'#c8ff00':'#1c1c2e'; }
+    }
+    if(_buf.length===4){
+      setTimeout(()=>{
+        if(_buf===DEVICE_PIN){
+          sessionStorage.setItem(_DEVICE_PIN_KEY,'yes');
+          overlay.style.transition='opacity .3s';
+          overlay.style.opacity='0';
+          setTimeout(()=>{ overlay.remove(); delete window.dlKey; onUnlock(); }, 300);
+        } else {
+          _buf='';
+          for(let i=0;i<4;i++){const d=document.getElementById('dld'+i);if(d){d.style.background='transparent';d.style.borderColor='#ff1744';}}
+          document.getElementById('dl-err').textContent='PIN incorrecto';
+          // Shake
+          overlay.style.transition='transform .08s';
+          overlay.style.transform='translateX(10px)';
+          setTimeout(()=>overlay.style.transform='translateX(-10px)',80);
+          setTimeout(()=>overlay.style.transform='translateX(5px)',160);
+          setTimeout(()=>{overlay.style.transform='translateX(0)';for(let i=0;i<4;i++){const d=document.getElementById('dld'+i);if(d)d.style.borderColor='#1c1c2e';}},240);
+          setTimeout(()=>document.getElementById('dl-err').textContent='',2000);
+        }
+      },150);
+    }
+  };
+}
+
 const SB_URL = 'https://raoxkjnwrccoxjcipfpv.supabase.co';
 const SB_KEY = 'sb_publishable__-K1pC4bOJHRf8JQ__OOzg_jqLxlGla';
-const _sb = supabase.createClient(SB_URL, SB_KEY);
+const _sb    = supabase.createClient(SB_URL, SB_KEY);
 
 let currentUser=null, userProfile=null, currentPage='pos';
 let selectedEvent=null, allEvents=[];
 let posProducts=[], posCart={}, allPOS=[];
 let nfcReader=null, nfcSupported=false, lastScannedUID=null;
+const TAQUILLA_CONFIG = {
+  COMISION_WEB: 3.0,
+  COMISION_TAQUILLA: 4.0
+};
 
+let taquillaCart = [];
+let taquillaTotal = 0;
+let taquillaMetodoPago = 'efectivo';
+let taquillaCajaState = {
+  apertura: null,
+  efectivoInicial: 0,
+  ventasEfectivo: 0,
+  ventasTarjeta: 0,
+  ventasMixto: 0,
+  totalVentas: 0,
+  entradasVendidas: 0
+};
+
+let tiposEntrada = [
+  { id: 'general', nombre: 'Entrada General', precio: 25.00, categoria: 'standard', stock: 500, descripcion: 'Acceso general', color: '#00d4ff' },
+  { id: 'vip', nombre: 'Entrada VIP', precio: 50.00, categoria: 'premium', stock: 100, descripcion: 'Acceso VIP', color: '#ff3cac' },
+  { id: 'estudiante', nombre: 'Estudiante', precio: 20.00, categoria: 'descuento', stock: 200, descripcion: 'Con acreditación', color: '#c8ff00' }
+];
+  
 let _lastScanUID=null, _lastScanTS=0;
 function isDuplicateScan(uid){
   const now=Date.now();
@@ -225,16 +365,19 @@ const NAV=[
   {key:'dashboard',icon:'📊',label:'Dashboard'},
   {key:'products',icon:'🏷️',label:'Productos'},
   {key:'config',icon:'⚙️',label:'Configuración'},
+  {sec:'Taquilla Física'},
+  {key:'taquilla',icon:'🎫',label:'Venta Entradas'},
+  {key:'taquilla-caja',icon:'💰',label:'Caja Diaria'},
 ];
-const PAGE_TITLES={pos:'Punto de Venta',topup:'Recarga de Saldo',register:'Registrar Pulsera',access:'Control de Acceso',
-  balance:'Consultar Saldo',transactions:'Movimientos',dashboard:'Dashboard',products:'Productos',config:'Configuración'};
+const PAGE_TITLES={pos:'Punto de Venta',topup:'Recarga de Saldo',register:'Registrar Pulsera',access:'Control de Acceso',taquilla:'Taquilla - Venta de Entradas',
+  'taquilla-caja':'Gestión de Caja',balance:'Consultar Saldo',transactions:'Movimientos',dashboard:'Dashboard',products:'Productos',config:'Configuración'};
 
 function toast(msg,ms=2500){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),ms);}
 function fmt(n){return(n||0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fmtDate(d){return new Date(d).toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}
 
 // ════════════════════════════════════════
-//  MODAL UNIVERSAL
+//  MODAL UNIVERSAL — reemplaza prompt/confirm/alert
 // ════════════════════════════════════════
 function closeModal(){
   document.getElementById('modal-overlay').classList.remove('show');
@@ -244,6 +387,52 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
   if(e.target === document.getElementById('modal-overlay')) closeModal();
 });
 
+// Modal de formulario para añadir producto
+function modalAddProduct(){
+  const categories = ['Bebidas','Comida','Merch','General','Otros'];
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">🏷️ Nuevo producto</div>
+    <div class="modal-sub">Añadir producto al catálogo del evento</div>
+    <div id="modal-err" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
+    <label class="form-lbl">Nombre del producto</label>
+    <input class="form-input" id="mp-nombre" placeholder="Ej: Cocacola, Cerveza, Camiseta…" autocomplete="off"/>
+    <label class="form-lbl">Precio (€)</label>
+    <input class="form-input" id="mp-precio" type="number" min="0.01" step="0.01" placeholder="3.50"/>
+    <label class="form-lbl">Categoría</label>
+    <select class="form-select" id="mp-cat">
+      ${categories.map(c=>`<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:10px;margin-top:4px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" style="flex:2" onclick="submitAddProduct()">Añadir producto</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(()=>document.getElementById('mp-nombre')?.focus(), 80);
+  // Enter en precio → submit
+  document.getElementById('mp-precio')?.addEventListener('keydown', e => { if(e.key==='Enter') submitAddProduct(); });
+}
+
+async function submitAddProduct(){
+  const nombre = document.getElementById('mp-nombre')?.value?.trim();
+  const precio = parseFloat(document.getElementById('mp-precio')?.value);
+  const cat    = document.getElementById('mp-cat')?.value || 'General';
+  const err    = document.getElementById('modal-err');
+  if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
+  if(!precio || precio <= 0){ err.textContent='Introduce un precio válido'; err.style.display='block'; return; }
+  const btn = document.querySelector('#modal-box .btn-p');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const{error}=await _sb.from('rfid_products').insert({
+    event_id: selectedEvent?.id, name: nombre, price: precio,
+    category: cat, active: true, sort_order: posProducts.length
+  });
+  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Añadir producto';} return; }
+  closeModal();
+  toast(`"${nombre}" añadido ✓`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// Modal de UID manual
 function modalManualUID(){
   document.getElementById('modal-box').innerHTML=`
     <div class="modal-title">🔑 UID Manual</div>
@@ -267,6 +456,65 @@ function submitManualUID(){
   handleNFCScan(uid);
 }
 
+// Modal PIN de admin (reemplaza prompt PIN)
+let _pinAdminBuffer = '';
+function modalAdminPIN(title, subtitle, onSuccess){
+  _pinAdminBuffer = '';
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">${title||'🔒 PIN de administrador'}</div>
+    <div class="modal-sub">${subtitle||'Introduce el PIN para continuar'}</div>
+    <div class="pin-dots" id="adm-pin-dots">
+      <div class="pin-dot" id="admpd0"></div>
+      <div class="pin-dot" id="admpd1"></div>
+      <div class="pin-dot" id="admpd2"></div>
+      <div class="pin-dot" id="admpd3"></div>
+    </div>
+    <div class="pin-pad">
+      ${[1,2,3,4,5,6,7,8,9,'empty',0,'⌫'].map(k=>
+        k==='empty'
+          ? '<div class="pin-key empty"></div>'
+          : `<div class="pin-key" onclick="adminPinKey('${k}')">${k}</div>`
+      ).join('')}
+    </div>
+    <button class="btn btn-g btn-full" style="margin-top:14px;font-size:13px" onclick="closeModal()">Cancelar</button>`;
+  document.getElementById('modal-overlay').classList.add('show');
+  // Guardar callback
+  window._adminPinCallback = onSuccess;
+}
+
+function adminPinKey(k){
+  if(k==='⌫'){ _pinAdminBuffer=_pinAdminBuffer.slice(0,-1); }
+  else if(_pinAdminBuffer.length < 4){ _pinAdminBuffer += k; }
+  // Actualizar dots
+  for(let i=0;i<4;i++){
+    const d=document.getElementById('admpd'+i);
+    if(d){ d.className='pin-dot'+(i<_pinAdminBuffer.length?' filled':''); }
+  }
+  if(_pinAdminBuffer.length === 4){
+    setTimeout(()=>{
+      if(_pinAdminBuffer === '0607'){
+        closeModal();
+        if(window._adminPinCallback) window._adminPinCallback();
+        window._adminPinCallback = null;
+      } else {
+        _pinAdminBuffer = '';
+        for(let i=0;i<4;i++){const d=document.getElementById('admpd'+i);if(d)d.className='pin-dot';}
+        // Shake
+        const box = document.getElementById('modal-box');
+        if(box){
+          box.style.transition='transform .08s';
+          box.style.transform='translateX(8px)';
+          setTimeout(()=>box.style.transform='translateX(-8px)',80);
+          setTimeout(()=>box.style.transform='translateX(4px)',160);
+          setTimeout(()=>box.style.transform='translateX(0)',240);
+        }
+        toast('⛔ PIN incorrecto');
+      }
+    }, 150);
+  }
+}
+
+// Modal confirmación (reemplaza confirm nativo)
 function modalConfirm(title, body, onConfirm, btnLabel='Confirmar', danger=false){
   document.getElementById('modal-box').innerHTML=`
     <div class="modal-title">${title}</div>
@@ -354,6 +602,8 @@ function navigate(page){
     pos:renderPOS, topup:renderTopup, register:renderRegister,
     access:renderAccess, balance:renderBalance, transactions:renderTransactions,
     dashboard:renderDashboard, products:renderProducts, config:renderConfig
+    taquilla:renderTaquilla,
+    'taquilla-caja':renderTaquillaCaja
   }[page]||renderPOS)(pc);
 }
 window.addEventListener('hashchange',()=>{const h=window.location.hash.replace('#','');if(h&&h!==currentPage)navigate(h);});
@@ -393,6 +643,7 @@ function handleNFCScan(uid){
   else toast('UID: '+uid);
 }
 
+// ── UID manual — ahora usa modal integrado ──
 function manualUIDInput(){ modalManualUID(); }
 
 // ════════════════════════════════════════
@@ -491,22 +742,908 @@ async function onPOSScan(uid){
   setTimeout(()=>{hideResult();cancelPOSCharge();updateCartUI();},2500);
 }
 
-// Implementar resto de páginas (topup, register, access, balance, transactions, dashboard, products, config)
-// Por brevedad del archivo, usar las mismas funciones del código original
+// ════════════════════════════════════════
+//  TOPUP
+// ════════════════════════════════════════
+let topupAmount=0, topupWristband=null, topupCheckInterval=null;
 
-function renderTopup(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Topup - En desarrollo</div>'; }
-function renderRegister(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Register - En desarrollo</div>'; }
-function renderAccess(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Access - En desarrollo</div>'; }
-function renderBalance(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Balance - En desarrollo</div>'; }
-function renderTransactions(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Transactions - En desarrollo</div>'; }
-function renderDashboard(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Dashboard - En desarrollo</div>'; }
-function renderProducts(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Products - En desarrollo</div>'; }
-function renderConfig(pc){ pc.innerHTML='<div style="text-align:center;padding:40px">Módulo Config - En desarrollo</div>'; }
+function renderTopup(pc){
+  topupAmount=0; topupWristband=null;
+  pc.innerHTML=`<div class="g2">
+    <div>
+      <div class="card mb16">
+        <div class="card-title">1. Escanear pulsera</div>
+        <div class="nfc-scan" style="padding:20px">
+          <div class="nfc-ring scanning" id="topup-nfc-ring" style="width:120px;height:120px"><span class="emoji" style="font-size:36px">📡</span></div>
+          <div class="nfc-label" style="font-size:15px;margin-top:12px">Acerca la pulsera</div>
+          <div class="nfc-sub" id="topup-scan-sub">Primero identifica la pulsera</div>
+          <button class="btn btn-g" style="margin-top:12px;font-size:13px" onclick="manualUIDInput()">UID manual</button>
+        </div>
+        <div id="topup-wristband-info" style="display:none;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-top:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><div style="font-weight:600" id="topup-holder-name">—</div><div style="font-size:12px;color:var(--muted);font-family:monospace" id="topup-holder-uid">—</div></div>
+            <div style="text-align:right"><div style="font-size:11px;color:var(--muted)">Saldo actual</div><div style="font-family:Syne;font-weight:700;font-size:22px;color:var(--a1)" id="topup-holder-bal">0€</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">2. Seleccionar importe</div>
+        <div class="topup-grid">
+          ${[5,10,20,30,50,100].map(a=>`<div class="topup-btn" onclick="selectTopup(${a},this)"><div class="amount">${a}€</div></div>`).join('')}
+        </div>
+        <label class="form-lbl">O cantidad personalizada</label>
+        <input class="form-input" id="topup-custom" type="number" min="1" step="0.5" placeholder="Ej: 15" oninput="customTopup(this.value)" style="margin-bottom:0"/>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-title">3. Cobrar con SumUp</div>
+        <div style="text-align:center;padding:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Importe a cobrar</div>
+          <div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1)" id="topup-amount-display">0,00€</div>
+          <div id="topup-holder-label" style="font-size:13px;color:var(--muted);margin-top:4px">—</div>
+        </div>
+        <div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span>🔒</span><span style="font-size:13px;color:var(--warn)">El saldo solo se añade cuando SumUp confirma el pago</span></div>
+          <div style="font-size:12px;color:var(--muted)">Evita recargas sin cobro real.</div>
+        </div>
+        <button class="btn btn-p btn-full btn-lg" id="topup-sumup-btn" onclick="startSumUpTopup()" disabled style="opacity:.5">Cobrar con SumUp</button>
+        <div style="margin-top:12px;text-align:center">
+          <button class="btn btn-g" style="font-size:13px" onclick="requestManualTopup()">⚠️ Recarga manual (solo admin)</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
 
-function onTopupScan(uid){}
-function onRegisterScan(uid){}
-function onAccessScan(uid){}
-function onBalanceScan(uid){}
+function selectTopup(a,el){topupAmount=a;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));el.classList.add('selected');document.getElementById('topup-custom').value='';updateTopupUI();}
+function customTopup(v){topupAmount=parseFloat(v)||0;document.querySelectorAll('.topup-btn').forEach(b=>b.classList.remove('selected'));updateTopupUI();}
+
+function updateTopupUI(){
+  const fee=topupAmount>0?Math.round(topupAmount*3.5)/100:0;
+  const total=topupAmount+fee;
+  document.getElementById('topup-amount-display').textContent=topupAmount>0?fmt(topupAmount)+'€':'0,00€';
+  document.getElementById('topup-holder-label').textContent=topupWristband
+    ?(topupWristband.holder_name||topupWristband.uid)+(fee>0?' · Pago total: '+fmt(total)+'€ (incl. '+fmt(fee)+'€ comisión)':'')
+    :'Escanea la pulsera primero';
+  const btn=document.getElementById('topup-sumup-btn');
+  if(topupAmount>0&&topupWristband){btn.disabled=false;btn.style.opacity='1';btn.textContent='Cobrar '+fmt(total)+'€ con SumUp';}
+  else{btn.disabled=true;btn.style.opacity='.5';btn.textContent='Cobrar con SumUp';}
+}
+
+async function onTopupScan(uid){
+  const ring=document.getElementById('topup-nfc-ring'),sub=document.getElementById('topup-scan-sub');
+  ring.className='nfc-ring'; sub.textContent='Buscando...';
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).single();
+  if(!wb){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='❌';sub.textContent='No registrada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent='Primero identifica la pulsera';},2000);return;}
+  topupWristband=wb;
+  ring.className='nfc-ring success'; ring.querySelector('.emoji').textContent='✅'; sub.textContent='Pulsera identificada';
+  document.getElementById('topup-wristband-info').style.display='block';
+  document.getElementById('topup-holder-name').textContent=wb.holder_name||'Sin nombre';
+  document.getElementById('topup-holder-uid').textContent=uid;
+  document.getElementById('topup-holder-bal').textContent=fmt(wb.balance)+'€';
+  updateTopupUI();
+}
+
+function startSumUpTopup(){
+  if(!topupWristband||topupAmount<=0)return;
+  const btn=document.getElementById('topup-sumup-btn');
+  btn.disabled=true; btn.textContent='Creando pago...';
+  fetch('https://inout-api.vercel.app/api/rfid/topup',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({wristband_id:topupWristband.id,uid:topupWristband.uid,amount:topupAmount,event_id:selectedEvent?.id,operator:userProfile.nombre})
+  })
+  .then(r=>r.json())
+  .then(data=>{
+    if(data.error){toast('Error: '+data.error);btn.disabled=false;btn.textContent='Cobrar con SumUp';return;}
+    sessionStorage.setItem('topup_sumup_id',data.sumup_checkout_id);
+    sessionStorage.setItem('topup_wristband_id',topupWristband.id);
+    sessionStorage.setItem('topup_amount',String(topupAmount));
+    sessionStorage.setItem('topup_ref',data.reference);
+    const isAndroid=/Android/i.test(navigator.userAgent);
+    if(isAndroid){
+      const fee=Math.round(topupAmount*3.5)/100;
+      window.location.href='sumupmerchant://pay/1.0'
+        +'?affiliate-key=sup_afk_Yw5nEDC5oRf34ycz09JFqPkR1DLQR5MH'
+        +'&app-id=com.inoutmedia.valid'
+        +'&total='+(topupAmount+fee).toFixed(2)
+        +'&currency=EUR'
+        +'&title='+encodeURIComponent('Recarga '+(topupWristband.holder_name||topupWristband.uid))
+        +'&foreign-tx-id='+data.reference
+        +'&skip-screen-success=true'
+        +'&callback='+encodeURIComponent('https://inout-valid.vercel.app/#topup');
+    } else {
+      window.open(data.checkout_url,'_blank');
+    }
+    document.getElementById('page-content').innerHTML=`<div style="max-width:500px;margin:40px auto;text-align:center"><div class="card"><div style="font-size:48px;margin-bottom:16px">💳</div><div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">Pago en proceso</div><div style="font-size:15px;color:var(--muted);margin-bottom:8px">${topupWristband.holder_name||topupWristband.uid}</div><div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">${fmt(topupAmount)}€</div><div id="topup-verify-status" style="padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;font-size:14px;color:var(--warn)">⏳ Esperando confirmación...</div><div style="display:flex;gap:10px;flex-direction:column"><button class="btn btn-p btn-full btn-lg" onclick="checkTopupPayment()">🔄 Verificar pago</button><button class="btn btn-danger btn-full" onclick="cancelSumUpPayment()">❌ Cancelar</button></div></div></div>`;
+    topupCheckInterval=setInterval(()=>checkTopupPayment(),5000);
+  })
+  .catch(err=>{toast('Error: '+err.message);btn.disabled=false;btn.textContent='Cobrar con SumUp';});
+}
+
+function checkTopupPayment(){
+  const sumupId=sessionStorage.getItem('topup_sumup_id');
+  const wbId=sessionStorage.getItem('topup_wristband_id');
+  const amount=sessionStorage.getItem('topup_amount');
+  const ref=sessionStorage.getItem('topup_ref');
+  if(!sumupId||!wbId)return;
+  const el=document.getElementById('topup-verify-status');
+  if(el)el.innerHTML='🔄 Verificando...';
+  fetch(`https://inout-api.vercel.app/api/rfid/verify-topup?wristband=${wbId}&amount=${amount}&ref=${ref}&sumup_id=${sumupId}`)
+  .then(r=>r.json())
+  .then(data=>{
+    if(data.status==='completed'||data.status==='already_completed'){
+      if(topupCheckInterval){clearInterval(topupCheckInterval);topupCheckInterval=null;}
+      ['topup_sumup_id','topup_wristband_id','topup_amount','topup_ref'].forEach(k=>sessionStorage.removeItem(k));
+      showResult('success','💰','+'+fmt(parseFloat(amount))+'€ recargados','Nuevo saldo: '+fmt(data.balance)+'€ · '+(data.holder_name||''));
+      topupWristband=null;topupAmount=0;
+      setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+    }else{
+      if(el)el.innerHTML='⏳ Pago pendiente ('+(data.sumup_status||'procesando')+')<br><span style="font-size:12px;color:var(--muted)">Se verifica cada 5 seg.</span>';
+    }
+  })
+  .catch(()=>{if(el)el.textContent='⚠️ Error verificando. Reintenta.';});
+}
+
+function cancelSumUpPayment(){
+  if(topupCheckInterval){clearInterval(topupCheckInterval);topupCheckInterval=null;}
+  ['topup_sumup_id','topup_wristband_id','topup_amount','topup_ref'].forEach(k=>sessionStorage.removeItem(k));
+  toast('Recarga cancelada');topupWristband=null;topupAmount=0;
+  renderTopup(document.getElementById('page-content'));
+}
+
+// ── Recarga manual — ahora usa modal PIN integrado ──
+function requestManualTopup(){
+  if(!topupWristband){toast('Escanea una pulsera primero');return;}
+  if(topupAmount<=0){toast('Selecciona un importe');return;}
+  modalAdminPIN(
+    '🔒 PIN de administrador',
+    `Recarga manual de ${fmt(topupAmount)}€ a ${topupWristband.holder_name||topupWristband.uid}`,
+    () => confirmManualTopup()
+  );
+}
+
+// Se llama tras PIN correcto
+function confirmManualTopup(){
+  const _wb = topupWristband;
+  const _amt = topupAmount;
+  // Confirmación visual (sin confirm nativo)
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">⚠️ Confirmar recarga manual</div>
+    <div class="modal-sub">Sin cobro SumUp — solo en casos excepcionales.</div>
+    <div style="background:rgba(255,171,0,.08);border:1px solid rgba(255,171,0,.2);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">
+        <span style="color:var(--muted)">Pulsera</span><strong>${_wb.holder_name||_wb.uid}</strong>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:20px;font-family:Syne;font-weight:800">
+        <span style="color:var(--muted);font-size:13px">Importe</span><span style="color:var(--a1)">+${fmt(_amt)}€</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" style="flex:2" onclick="executeManualTopup()">⚠️ Confirmar recarga</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+async function executeManualTopup(){
+  closeModal();
+  const newBal=parseFloat(topupWristband.balance)+topupAmount;
+  await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(topupWristband.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',topupWristband.id);
+  await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'⚠️ Recarga manual ('+userProfile.nombre+')',point_of_sale:'Manual',operator:userProfile.nombre,payment_method:'manual'});
+  showResult('success','⚠️','Recarga manual: +'+fmt(topupAmount)+'€','Nuevo saldo: '+fmt(newBal)+'€');
+  topupWristband=null;topupAmount=0;
+  setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
+}
+
+// ── CATÁLOGO GLOBAL: carga productos del catálogo maestro ─────────────────
+async function loadCatalog(){
+  const{data}=await _sb.from('rfid_products_catalog')
+    .select('*').eq('active',true).order('category').order('name');
+  return data||[];
+}
+
+// Para el POS: solo instancias activas del evento actual
+async function loadProducts(){
+  if(!selectedEvent) return;
+  const{data}=await _sb.from('rfid_products')
+    .select('*')
+    .eq('event_id',selectedEvent.id)
+    .eq('active',true)
+    .order('sort_order');
+  posProducts=data||[];
+}
+
+// Para la pantalla de gestión: todas las instancias del evento (activas e inactivas)
+async function loadAllProductsForEvent(){
+  if(!selectedEvent) return [];
+  // Intentar con JOIN al catálogo; si falla (tabla no existe) hacer query simple
+  try {
+    const{data, error}=await _sb.from('rfid_products')
+      .select('*, rfid_products_catalog(name,category)')
+      .eq('event_id',selectedEvent.id)
+      .order('sort_order');
+    if(error) throw error;
+    return (data||[]).map(p=>({
+      ...p,
+      name:     p.rfid_products_catalog?.name     || p.name     || '—',
+      category: p.rfid_products_catalog?.category || p.category || '—',
+      stock:    p.stock || 0,
+      active:   p.active !== false, // default true si null
+    }));
+  } catch(e) {
+    // Fallback: query simple sin JOIN (catálogo no existe aún)
+    const{data}=await _sb.from('rfid_products')
+      .select('*')
+      .eq('event_id',selectedEvent.id)
+      .order('sort_order,name');
+    return (data||[]).map(p=>({
+      ...p,
+      stock:  p.stock  || 0,
+      active: p.active !== false,
+    }));
+  }
+}
+
+// Asegura que todos los productos del catálogo tienen una instancia en el evento
+async function syncCatalogToEvent(eventId){
+  if(!eventId) return;
+  try {
+    const[{data:catalog, error:catErr},{data:existing}]=await Promise.all([
+      _sb.from('rfid_products_catalog').select('id,name,category,default_price').eq('active',true),
+      _sb.from('rfid_products').select('catalog_id').eq('event_id',eventId)
+    ]);
+    if(catErr) return; // tabla no existe aún — ignorar silenciosamente
+    const existingIds=new Set((existing||[]).map(p=>p.catalog_id).filter(Boolean));
+    const missing=(catalog||[]).filter(c=>!existingIds.has(c.id));
+    if(!missing.length) return;
+    await _sb.from('rfid_products').upsert(
+      missing.map((c,i)=>({
+        event_id:   eventId,
+        catalog_id: c.id,
+        name:       c.name,
+        category:   c.category,
+        price:      c.default_price||0,
+        stock:      0,
+        active:     false,
+        sort_order: i,
+      })),
+      {onConflict:'event_id,catalog_id', ignoreDuplicates:true}
+    );
+  } catch(e) {
+    // Tabla catálogo no existe — no hacer nada, funcionar con rfid_products directo
+    console.log('syncCatalogToEvent: catálogo no disponible, usando rfid_products directo');
+  }
+}
+
+// ════════════════════════════════════════
+//  PRODUCTS — pantalla de gestión
+// ════════════════════════════════════════
+async function renderProducts(pc){
+  // Sincronizar catálogo → evento (añade productos nuevos del catálogo como inactivos)
+  await syncCatalogToEvent(selectedEvent?.id);
+  const todos = await loadAllProductsForEvent();
+  const activos   = todos.filter(p=>p.active).length;
+  const inactivos = todos.length - activos;
+
+  pc.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-family:Syne;font-weight:700;font-size:20px">${todos.length} productos</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">
+          <span style="color:var(--success)">${activos} activos</span> · 
+          <span style="color:var(--muted)">${inactivos} inactivos</span> en 
+          <strong style="color:var(--a3)">${selectedEvent?.nombre||'este evento'}</strong>
+        </div>
+      </div>
+      <button class="btn btn-p" onclick="modalAddCatalogProduct()">+ Nuevo producto global</button>
+    </div>
+
+    <div style="padding:10px 14px;background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.15);border-radius:10px;font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+      💡 Los productos son un <strong style="color:var(--txt)">catálogo global</strong>. Cada evento tiene su propia instancia con precio, stock y estado independientes.
+      Los nuevos productos aparecen <strong style="color:var(--warn)">inactivos</strong> hasta que los actives.
+    </div>
+
+    ${!todos.length
+      ? `<div class="card" style="text-align:center;padding:40px">
+           <div style="font-size:48px;margin-bottom:12px">🏷️</div>
+           <div style="color:var(--muted);margin-bottom:16px">Sin productos en el catálogo.</div>
+           <button class="btn btn-p" onclick="modalAddCatalogProduct()">+ Crear primer producto</button>
+         </div>`
+      : `<div class="card" style="padding:0;overflow:hidden">
+           <div class="tbl-wrap">
+             <table>
+               <thead>
+                 <tr>
+                   <th>Nombre</th>
+                   <th>Precio</th>
+                   <th>Categoría</th>
+                   <th style="text-align:right">Stock</th>
+                   <th style="text-align:center">Estado</th>
+                   <th style="text-align:right">Acciones</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 ${todos.map(p=>`
+                   <tr id="prod-row-${p.id}" style="${!p.active?'opacity:.6':''}">
+                     <td><div style="font-weight:500">${p.name}</div></td>
+                     <td><div style="color:var(--a1);font-weight:700;font-family:'Syne',sans-serif">${fmt(p.price)}€</div></td>
+                     <td><span class="badge b-gray">${p.category||'—'}</span></td>
+                     <td style="text-align:right">
+                       <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                         <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;color:${(p.stock||0)===0?'var(--muted)':(p.stock||0)<10?'var(--warn)':'var(--a1)'}">${p.stock||0}</span>
+                         <div style="display:flex;flex-direction:column;gap:2px">
+                           <button onclick="changeStock('${p.id}',${(p.stock||0)+1})" style="width:20px;height:16px;background:var(--surf);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--muted);font-size:10px;line-height:1">▲</button>
+                           <button onclick="changeStock('${p.id}',${Math.max(0,(p.stock||0)-1)})" style="width:20px;height:16px;background:var(--surf);border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--muted);font-size:10px;line-height:1">▼</button>
+                         </div>
+                       </div>
+                     </td>
+                     <td style="text-align:center">
+                       <div onclick="toggleProductActive('${p.id}',${!p.active},'${p.name.replace(/'/g,"\\'")}',this)"
+                            style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:600;transition:all .15s;min-width:90px;justify-content:center;
+                              ${p.active
+                                ? 'background:rgba(0,230,118,.12);color:var(--success);border:1px solid rgba(0,230,118,.25)'
+                                : 'background:rgba(107,107,136,.1);color:var(--muted);border:1px solid var(--border)'}">
+                         <span style="width:8px;height:8px;border-radius:50%;background:${p.active?'var(--success)':'var(--muted)'};flex-shrink:0;${p.active?'box-shadow:0 0 5px rgba(0,230,118,.6)':''}"></span>
+                         ${p.active?'Activo':'Inactivo'}
+                       </div>
+                     </td>
+                     <td style="text-align:right">
+                       <div style="display:flex;gap:6px;justify-content:flex-end">
+                         <button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-height:34px" onclick="modalEditProduct('${p.id}','${p.name.replace(/'/g,"\\'")}',${p.price},'${p.category||'General'}',${p.active},${p.stock||0})">✏️</button>
+                         <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;min-height:34px" onclick="confirmDeleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">✕</button>
+                       </div>
+                     </td>
+                   </tr>`).join('')}
+               </tbody>
+             </table>
+           </div>
+         </div>`
+    }`;
+}
+
+// ── Toggle activo/inactivo inline ──────────────────────────────────────────
+async function toggleProductActive(id, newActive, name, el){
+  // Feedback visual inmediato
+  el.style.opacity='0.5';
+  const{error}=await _sb.from('rfid_products').update({active:newActive}).eq('id',id);
+  if(error){ toast('Error: '+error.message); el.style.opacity='1'; return; }
+  toast(newActive?`"${name}" activado ✓`:`"${name}" desactivado`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// ── Cambiar stock con los botones ▲▼ ──────────────────────────────────────
+async function changeStock(id, newStock){
+  const{error}=await _sb.from('rfid_products').update({stock:newStock}).eq('id',id);
+  if(error){ toast('Error stock: '+error.message); return; }
+  // Actualizar solo el número en la fila sin re-renderizar toda la tabla
+  renderProducts(document.getElementById('page-content'));
+}
+
+// ── Modal añadir producto al catálogo global ──────────────────────────────
+function modalAddCatalogProduct(){
+  const categories=['Bebidas','Comida','Merch','General','Otros'];
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">🏷️ Nuevo producto global</div>
+    <div class="modal-sub">Se añadirá al catálogo y aparecerá <strong style="color:var(--warn)">inactivo</strong> en todos los eventos actuales y futuros.</div>
+    <div id="modal-err" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
+    <label class="form-lbl">Nombre del producto</label>
+    <input class="form-input" id="mp-nombre" placeholder="Ej: Cocacola, Cerveza, Camiseta…" autocomplete="off"/>
+    <label class="form-lbl">Precio por defecto (€)</label>
+    <input class="form-input" id="mp-precio" type="number" min="0" step="0.01" placeholder="3.50"/>
+    <label class="form-lbl">Categoría</label>
+    <select class="form-select" id="mp-cat">
+      ${categories.map(c=>`<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <div style="padding:10px 14px;background:rgba(255,171,0,.06);border:1px solid rgba(255,171,0,.15);border-radius:8px;font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+      ⚙️ Cada evento puede personalizar el precio y el stock. El producto arrancará <strong style="color:var(--warn)">inactivo</strong> hasta que el responsable lo active.
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" style="flex:2" onclick="submitAddCatalogProduct()">Crear en catálogo</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(()=>{
+    document.getElementById('mp-nombre')?.focus();
+    document.getElementById('mp-precio')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitAddCatalogProduct();});
+  }, 80);
+}
+
+async function submitAddCatalogProduct(){
+  const nombre = document.getElementById('mp-nombre')?.value?.trim();
+  const precio = parseFloat(document.getElementById('mp-precio')?.value)||0;
+  const cat    = document.getElementById('mp-cat')?.value||'General';
+  const err    = document.getElementById('modal-err');
+  if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
+  const btn = document.querySelector('#modal-box .btn-p');
+  if(btn){ btn.disabled=true; btn.textContent='Creando…'; }
+
+  // 1. Insertar en catálogo maestro
+  const{data:catItem, error:catErr}=await _sb.from('rfid_products_catalog').insert({
+    name:nombre, category:cat, default_price:precio, active:true
+  }).select().single();
+
+  if(catErr){
+    // Si la tabla no existe, fallback: crear solo en rfid_products de todos los eventos
+    if(catErr.code==='42P01'){
+      await submitAddProduct_fallback(nombre, precio, cat, err, btn);
+      return;
+    }
+    err.textContent='Error catálogo: '+catErr.message; err.style.display='block';
+    if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return;
+  }
+
+  // 2. Crear instancia inactiva en todos los eventos existentes
+  // Usamos upsert con ignoreDuplicates para evitar duplicados si el trigger SQL ya actuó
+  const{data:eventos}=await _sb.from('events').select('id')
+    .in('estado',['publicado','confirmado','produccion','borrador','finalizado']);
+  const eventosIds=(eventos||[]).map(e=>e.id);
+
+  if(eventosIds.length){
+    await _sb.from('rfid_products').upsert(
+      eventosIds.map((eid,i)=>({
+        event_id:   eid,
+        catalog_id: catItem.id,
+        name:       nombre,
+        category:   cat,
+        price:      precio,
+        stock:      0,
+        active:     false,
+        sort_order: 9999+i,
+      })),
+      {onConflict:'event_id,catalog_id', ignoreDuplicates:true}
+    );
+  }
+
+  closeModal();
+  toast(`"${nombre}" añadido al catálogo — inactivo en ${eventosIds.length} evento(s) ✓`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// Fallback si rfid_products_catalog no existe aún (compatibilidad hacia atrás)
+async function submitAddProduct_fallback(nombre, precio, cat, err, btn){
+  const{data:eventos}=await _sb.from('events').select('id')
+    .in('estado',['publicado','confirmado','produccion','borrador']);
+  const eventosIds=(eventos||[]).map(e=>e.id);
+  if(!eventosIds.length){ err.textContent='No hay eventos'; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return; }
+  const{error}=await _sb.from('rfid_products').insert(
+    eventosIds.map((eid,i)=>({event_id:eid,name:nombre,price:precio,category:cat,active:false,stock:0,sort_order:9999+i}))
+  );
+  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Crear en catálogo';} return; }
+  closeModal();
+  toast(`"${nombre}" añadido (inactivo) en ${eventosIds.length} evento(s) ✓`);
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// Mantener compatibilidad con el botón "+ Añadir producto" antiguo
+function modalAddProduct(){ modalAddCatalogProduct(); }
+async function submitAddProduct(){ await submitAddCatalogProduct(); }
+
+// ── Modal editar — precio, stock y estado por evento ──────────────────────
+function modalEditProduct(id, nombre, precio, categoria, activo, stock){
+  const categories=['Bebidas','Comida','Merch','General','Otros'];
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">✏️ Editar producto</div>
+    <div class="modal-sub">Cambios aplicados <strong style="color:var(--a3)">solo en ${selectedEvent?.nombre||'este evento'}</strong>.</div>
+    <div id="modal-err" style="display:none;background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.2);color:var(--danger);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px"></div>
+
+    <label class="form-lbl">Nombre</label>
+    <input class="form-input" id="ep-nombre" value="${nombre}"/>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label class="form-lbl">Precio en este evento (€)</label>
+        <input class="form-input" id="ep-precio" type="number" min="0" step="0.01" value="${precio}" style="margin-bottom:0"/>
+      </div>
+      <div>
+        <label class="form-lbl">Stock disponible</label>
+        <input class="form-input" id="ep-stock" type="number" min="0" step="1" value="${stock||0}" style="margin-bottom:0"/>
+      </div>
+    </div>
+
+    <label class="form-lbl" style="margin-top:14px">Categoría</label>
+    <select class="form-select" id="ep-cat">
+      ${categories.map(c=>`<option value="${c}" ${c===categoria?'selected':''}>${c}</option>`).join('')}
+    </select>
+
+    <label class="form-lbl">Estado en este evento</label>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div id="ep-on" onclick="setEditActive(true)" style="flex:1;padding:14px;border-radius:10px;text-align:center;cursor:pointer;transition:all .15s;
+        border:2px solid ${activo?'var(--success)':'var(--border)'};background:${activo?'rgba(0,230,118,.08)':'transparent'}">
+        <div style="font-size:22px;margin-bottom:4px">✅</div>
+        <div style="font-weight:600;font-size:13px;color:${activo?'var(--success)':'var(--muted)'}">Activo</div>
+        <div style="font-size:11px;color:var(--muted)">Visible en POS</div>
+      </div>
+      <div id="ep-off" onclick="setEditActive(false)" style="flex:1;padding:14px;border-radius:10px;text-align:center;cursor:pointer;transition:all .15s;
+        border:2px solid ${!activo?'var(--danger)':'var(--border)'};background:${!activo?'rgba(255,23,68,.08)':'transparent'}">
+        <div style="font-size:22px;margin-bottom:4px">⛔</div>
+        <div style="font-weight:600;font-size:13px;color:${!activo?'var(--danger)':'var(--muted)'}">Inactivo</div>
+        <div style="font-size:11px;color:var(--muted)">Oculto en POS</div>
+      </div>
+    </div>
+    <input type="hidden" id="ep-activo-val" value="${activo}"/>
+
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" style="flex:2" onclick="submitEditProduct('${id}')">Guardar</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(()=>document.getElementById('ep-nombre')?.focus(), 80);
+}
+
+function setEditActive(val){
+  document.getElementById('ep-activo-val').value=String(val);
+  const on=document.getElementById('ep-on'), off=document.getElementById('ep-off');
+  if(val){
+    on.style.borderColor='var(--success)'; on.style.background='rgba(0,230,118,.08)';
+    on.querySelector('div:nth-child(2)').style.color='var(--success)';
+    off.style.borderColor='var(--border)'; off.style.background='transparent';
+    off.querySelector('div:nth-child(2)').style.color='var(--muted)';
+  } else {
+    off.style.borderColor='var(--danger)'; off.style.background='rgba(255,23,68,.08)';
+    off.querySelector('div:nth-child(2)').style.color='var(--danger)';
+    on.style.borderColor='var(--border)';  on.style.background='transparent';
+    on.querySelector('div:nth-child(2)').style.color='var(--muted)';
+  }
+}
+
+async function submitEditProduct(id){
+  const nombre = document.getElementById('ep-nombre')?.value?.trim();
+  const precio = parseFloat(document.getElementById('ep-precio')?.value)||0;
+  const stock  = parseInt(document.getElementById('ep-stock')?.value)||0;
+  const cat    = document.getElementById('ep-cat')?.value;
+  const activo = document.getElementById('ep-activo-val')?.value==='true';
+  const err    = document.getElementById('modal-err');
+  if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
+  const btn = document.querySelector('#modal-box .btn-p');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  const{error}=await _sb.from('rfid_products')
+    .update({name:nombre, price:precio, stock:stock, category:cat, active:activo})
+    .eq('id',id);
+  if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Guardar';} return; }
+  closeModal();
+  toast('Producto actualizado ✓');
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// ── Confirmar eliminar — solo en este evento ───────────────────────────────
+function confirmDeleteProduct(id, name){
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">🗑️ Eliminar de este evento</div>
+    <div class="modal-sub">¿Eliminar <strong style="color:var(--txt)">${name}</strong> de <strong style="color:var(--a3)">${selectedEvent?.nombre||'este evento'}</strong>?</div>
+    <div style="padding:10px 14px;background:rgba(255,171,0,.07);border:1px solid rgba(255,171,0,.2);border-radius:8px;font-size:12px;color:var(--warn);margin-bottom:16px">
+      ⚠️ Solo se elimina la instancia de este evento. El producto sigue en el catálogo global y en los demás eventos.
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" style="flex:2" onclick="deleteProduct('${id}')">Eliminar aquí</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+async function deleteProduct(id){
+  closeModal();
+  const{error}=await _sb.from('rfid_products').delete().eq('id',id);
+  if(error){ toast('Error: '+error.message); return; }
+  toast('Eliminado de este evento');
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+
+// ════════════════════════════════════════
+//  REGISTER
+// ════════════════════════════════════════
+let registerUID=null;
+function renderRegister(pc){
+  registerUID=null;
+  pc.innerHTML=`<div class="g2">
+    <div>
+      <div class="nfc-scan">
+        <div class="nfc-ring scanning" id="reg-nfc-ring"><span class="emoji">📡</span></div>
+        <div class="nfc-label">Acerca la pulsera nueva</div>
+        <div class="nfc-sub" id="reg-sub">Esperando pulsera NFC...</div>
+        <button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button>
+      </div>
+    </div>
+    <div>
+      <div class="card" id="reg-form-card" style="opacity:.4;pointer-events:none">
+        <div class="card-title">Datos del asistente</div>
+        <div style="padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:13px"><span style="color:var(--muted)">UID:</span> <strong id="reg-uid-display" style="color:var(--a1);font-family:monospace">—</strong></div>
+        <label class="form-lbl">Nombre</label><input class="form-input" id="reg-nombre" placeholder="Nombre del asistente"/>
+        <label class="form-lbl">Email</label><input class="form-input" id="reg-email" type="email" placeholder="email@ejemplo.com"/>
+        <label class="form-lbl">Teléfono</label><input class="form-input" id="reg-phone" type="tel" placeholder="600 000 000"/>
+        <button class="btn btn-p btn-full btn-lg" style="margin-top:4px" onclick="doRegister()">Registrar pulsera</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function onRegisterScan(uid){
+  registerUID=uid;
+  document.getElementById('reg-nfc-ring').className='nfc-ring success';
+  document.getElementById('reg-nfc-ring').querySelector('.emoji').textContent='✅';
+  document.getElementById('reg-sub').textContent='UID: '+uid;
+  document.getElementById('reg-uid-display').textContent=uid;
+  const f=document.getElementById('reg-form-card');
+  f.style.opacity='1'; f.style.pointerEvents='auto';
+  document.getElementById('reg-nombre').focus();
+}
+
+async function doRegister(){
+  if(!registerUID){toast('Escanea una pulsera primero');return;}
+  const{data:existing}=await _sb.from('rfid_wristbands').select('id').eq('uid',registerUID).single();
+  if(existing){toast('⚠️ Esta pulsera ya está registrada');return;}
+  const{error}=await _sb.from('rfid_wristbands').insert({
+    uid:registerUID, event_id:selectedEvent?.id,
+    holder_name:document.getElementById('reg-nombre').value.trim()||null,
+    holder_email:document.getElementById('reg-email').value.trim()||null,
+    holder_phone:document.getElementById('reg-phone').value.trim()||null,
+    balance:0, total_loaded:0, total_spent:0, status:'active',
+    registered_by:userProfile.nombre
+  });
+  if(error){toast('Error: '+error.message);return;}
+  showResult('success','🎉','Pulsera registrada',(document.getElementById('reg-nombre').value||registerUID)+' — Saldo: 0,00€');
+  setTimeout(()=>{hideResult();renderRegister(document.getElementById('page-content'));},2000);
+}
+
+// ════════════════════════════════════════
+//  ACCESS CONTROL
+// ════════════════════════════════════════
+function renderAccess(pc){
+  pc.innerHTML=`
+    <div class="access-stats" id="acc-stats">
+      <div class="acc-stat"><div class="val" id="acc-inside" style="color:var(--success)">—</div><div class="lbl">Dentro ahora</div></div>
+      <div class="acc-stat"><div class="val" id="acc-entries" style="color:var(--a3)">—</div><div class="lbl">Entradas hoy</div></div>
+      <div class="acc-stat"><div class="val" id="acc-exits" style="color:var(--muted)">—</div><div class="lbl">Salidas hoy</div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 0 10px">
+      <div class="nfc-ring scanning" style="width:200px;height:200px" id="acc-ring">
+        <span class="emoji" style="font-size:64px">🚪</span>
+      </div>
+      <div class="nfc-label" style="margin-top:20px;font-size:22px">Control de Acceso</div>
+      <div class="nfc-sub" style="font-size:15px" id="acc-sub">Acerca la pulsera al lector</div>
+      <button class="btn btn-g" style="margin-top:20px" onclick="manualUIDInput()">UID manual</button>
+    </div>
+    <div class="acc-log" id="acc-log" style="max-height:220px;overflow-y:auto;margin-top:8px">
+      <div style="padding:16px;text-align:center;color:var(--muted);font-size:13px">Sin registros recientes</div>
+    </div>`;
+  loadAccessStats();
+}
+
+async function loadAccessStats(){
+  if(!selectedEvent) return;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const{data:logs}=await _sb.from('rfid_access_log')
+    .select('direction,created_at,rfid_wristbands(holder_name,uid)')
+    .eq('event_id',selectedEvent.id)
+    .gte('created_at',today.toISOString())
+    .order('created_at',{ascending:false})
+    .limit(50);
+  if(!logs) return;
+  const entries=logs.filter(l=>l.direction==='in').length;
+  const exits=logs.filter(l=>l.direction==='out').length;
+  const inside=Math.max(0,entries-exits);
+  const elIn=document.getElementById('acc-inside');
+  const elEnt=document.getElementById('acc-entries');
+  const elEx=document.getElementById('acc-exits');
+  if(elIn) elIn.textContent=inside;
+  if(elEnt) elEnt.textContent=entries;
+  if(elEx) elEx.textContent=exits;
+  const logEl=document.getElementById('acc-log');
+  if(logEl&&logs.length>0){
+    logEl.innerHTML=logs.slice(0,20).map(l=>{
+      const isIn=l.direction==='in';
+      const name=l.rfid_wristbands?.holder_name||l.rfid_wristbands?.uid||'—';
+      const time=new Date(l.created_at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+      return `<div class="acc-log-item"><div class="acc-dir ${isIn?'in':'out'}">${isIn?'↗️':'↙️'}</div><div style="flex:1"><div style="font-size:13px;font-weight:500">${name}</div><div style="font-size:11px;color:var(--muted)">${time}</div></div><span class="badge ${isIn?'b-green':'b-blue'}">${isIn?'ENTRADA':'SALIDA'}</span></div>`;
+    }).join('');
+  }
+}
+
+async function onAccessScan(uid){
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).maybeSingle();
+  if(!wb){showAccessResult(false,'NO REGISTRADA','UID: '+uid);return;}
+  if(wb.status!=='active'){showAccessResult(false,'BLOQUEADA',wb.holder_name||uid);return;}
+
+  // Obtener TODOS los registros de esta pulsera en este evento
+  const{data:logs}=await _sb.from('rfid_access_log')
+    .select('direction,created_at')
+    .eq('wristband_id',wb.id)
+    .eq('event_id',selectedEvent?.id)
+    .order('created_at',{ascending:true});
+
+  const entradas=(logs||[]).filter(l=>l.direction==='in').length;
+  const salidas =(logs||[]).filter(l=>l.direction==='out').length;
+
+  // Lógica: 1 entrada + 1 salida máximo por evento
+  if(entradas>=1 && salidas>=1){
+    // Ciclo completo — no permitir más
+    showAccessResult(false,'YA REGISTRADA',wb.holder_name||uid);
+    return;
+  }
+
+  // Si ya entró pero aún no salió → registrar salida
+  // Si no ha entrado → registrar entrada
+  const dir = entradas===0 ? 'in' : 'out';
+
+  await _sb.from('rfid_access_log').insert({
+    wristband_id:wb.id,
+    event_id:selectedEvent?.id,
+    direction:dir,
+    gate:'Principal',
+    operator:userProfile.nombre
+  });
+
+  showAccessResult(true, dir==='in'?'✅ ENTRADA':'🔵 SALIDA', wb.holder_name||uid, wb.balance);
+  setTimeout(()=>loadAccessStats(),500);
+}
+
+function showAccessResult(ok,title,name='',balance=null){
+  const d=document.createElement('div');
+  const isWarn = title.includes('YA REGISTRADA');
+  d.className='access-full '+(isWarn?'warn-screen':ok?'granted':'denied');
+  d.innerHTML=`
+    <div style="font-size:80px">${isWarn?'⚠️':ok?(title.includes('ENTRADA')?'🟢':'🔵'):'🔴'}</div>
+    <div class="access-text" style="color:${isWarn?'var(--warn)':ok?(title.includes('ENTRADA')?'var(--success)':'var(--a3)'):'var(--danger)'}">${title}</div>
+    <div class="access-sub">${name}</div>
+    ${isWarn?'<div class="access-sub" style="margin-top:8px;font-size:14px">Esta pulsera ya completó entrada y salida en este evento</div>':''}
+    ${!isWarn&&balance!==null?`<div class="access-balance">Saldo: ${fmt(balance)}€</div>`:''}`;
+  d.onclick=()=>d.remove();
+  document.body.appendChild(d);
+  if(navigator.vibrate) navigator.vibrate(isWarn?[100,50,100]:ok?100:[200,100,200]);
+  setTimeout(()=>d.remove(), isWarn?3500:2800);
+}
+
+// ════════════════════════════════════════
+//  BALANCE
+// ════════════════════════════════════════
+function renderBalance(pc){
+  pc.innerHTML=`<div style="max-width:500px;margin:0 auto">
+    <div class="nfc-scan">
+      <div class="nfc-ring scanning" id="bal-nfc-ring"><span class="emoji">💰</span></div>
+      <div class="nfc-label">Consultar saldo</div>
+      <div class="nfc-sub">Acerca la pulsera</div>
+      <button class="btn btn-g" style="margin-top:16px" onclick="manualUIDInput()">UID manual</button>
+    </div>
+    <div id="bal-result" style="display:none"></div>
+  </div>`;
+}
+
+async function onBalanceScan(uid){
+  const{data:wb}=await _sb.from('rfid_wristbands').select('*').eq('uid',uid).maybeSingle();
+  if(!wb){toast('Pulsera no registrada');return;}
+  const{data:txs}=await _sb.from('rfid_transactions').select('*').eq('wristband_id',wb.id).order('created_at',{ascending:false}).limit(10);
+  const r=document.getElementById('bal-result');r.style.display='block';
+  r.innerHTML=`<div class="card mb16" style="text-align:center;padding:30px">
+    <div style="font-size:13px;color:var(--muted);margin-bottom:4px">${wb.holder_name||'Sin nombre'}</div>
+    <div class="balance-big">${fmt(wb.balance)}€</div>
+    <div class="balance-label">Saldo disponible</div>
+    <div style="display:flex;justify-content:center;gap:16px;margin-top:16px">
+      <div><span style="font-size:11px;color:var(--muted)">Recargado</span><div style="font-family:Syne;font-weight:700;color:var(--success)">${fmt(wb.total_loaded)}€</div></div>
+      <div><span style="font-size:11px;color:var(--muted)">Gastado</span><div style="font-family:Syne;font-weight:700;color:var(--a2)">${fmt(wb.total_spent)}€</div></div>
+    </div>
+  </div>
+  <div class="card"><div class="card-title">Últimos movimientos</div>
+    ${(!txs||!txs.length)?'<div style="color:var(--muted);font-size:13px;text-align:center;padding:12px">Sin movimientos</div>'
+    :`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th></tr></thead><tbody>${txs.map(t=>`<tr><td style="font-size:12px;color:var(--muted)">${fmtDate(t.created_at)}</td><td><span class="badge ${t.type==='topup'?'b-green':'b-red'}">${t.type==='topup'?'Recarga':'Compra'}</span></td><td style="font-size:13px">${t.description||'—'}</td><td style="font-weight:600;color:${t.amount>=0?'var(--success)':'var(--danger)'}">${t.amount>=0?'+':''}${fmt(t.amount)}€</td></tr>`).join('')}</tbody></table></div>`}
+  </div>`;
+  document.getElementById('bal-nfc-ring').className='nfc-ring success';
+}
+
+// ════════════════════════════════════════
+//  TRANSACTIONS
+// ════════════════════════════════════════
+async function renderTransactions(pc){
+  pc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Cargando...</div>';
+  const{data}=await _sb.from('rfid_transactions').select('*, rfid_wristbands(holder_name,uid)').order('created_at',{ascending:false}).limit(100);
+  const txs=data||[];
+  pc.innerHTML=`<div class="card"><div class="card-title">Últimas transacciones (${txs.length})</div>
+    ${!txs.length?'<div style="color:var(--muted);text-align:center;padding:20px">Sin transacciones</div>'
+    :`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Pulsera</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>Saldo</th><th>Operador</th></tr></thead><tbody>
+    ${txs.map(t=>`<tr>
+      <td style="font-size:12px;color:var(--muted);white-space:nowrap">${fmtDate(t.created_at)}</td>
+      <td style="font-size:12px">${t.rfid_wristbands?.holder_name||t.rfid_wristbands?.uid||'—'}</td>
+      <td><span class="badge ${t.type==='topup'?'b-green':'b-red'}">${t.type}</span></td>
+      <td style="font-size:13px">${t.description||'—'}</td>
+      <td style="font-weight:600;color:${t.amount>=0?'var(--success)':'var(--danger)'}">${t.amount>=0?'+':''}${fmt(t.amount)}€</td>
+      <td style="font-size:12px;color:var(--muted)">${fmt(t.balance_after)}€</td>
+      <td style="font-size:12px;color:var(--muted)">${t.operator||'—'}</td>
+    </tr>`).join('')}
+    </tbody></table></div>`}
+  </div>`;
+}
+
+// ════════════════════════════════════════
+//  DASHBOARD
+// ════════════════════════════════════════
+async function renderDashboard(pc){
+  pc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Cargando...</div>';
+  const eid=selectedEvent?.id;
+  const[wR,tR,aR]=await Promise.all([
+    _sb.from('rfid_wristbands').select('balance,status').eq('event_id',eid),
+    _sb.from('rfid_transactions').select('type,amount').eq('event_id',eid),
+    _sb.from('rfid_access_log').select('direction').eq('event_id',eid)
+  ]);
+  const wbs=wR.data||[],txs=tR.data||[],accs=aR.data||[];
+  const totalBal=wbs.reduce((s,w)=>s+parseFloat(w.balance||0),0);
+  const activeWB=wbs.filter(w=>w.status==='active').length;
+  const totalTop=txs.filter(t=>t.type==='topup').reduce((s,t)=>s+parseFloat(t.amount),0);
+  const totalPur=txs.filter(t=>t.type==='purchase').reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+  const inside=Math.max(0,accs.filter(a=>a.direction==='in').length-accs.filter(a=>a.direction==='out').length);
+  pc.innerHTML=`
+    <div class="g3 mb24">
+      <div class="card" style="text-align:center"><div class="stat-lbl">Saldo en circulación</div><div class="stat-val" style="color:var(--a1)">${fmt(totalBal)}€</div></div>
+      <div class="card" style="text-align:center"><div class="stat-lbl">Total recargado</div><div class="stat-val" style="color:var(--success)">${fmt(totalTop)}€</div></div>
+      <div class="card" style="text-align:center"><div class="stat-lbl">Total consumido</div><div class="stat-val" style="color:var(--a2)">${fmt(totalPur)}€</div></div>
+    </div>
+    <div class="g3 mb24">
+      <div class="card" style="text-align:center"><div class="stat-lbl">Pulseras activas</div><div class="stat-val" style="color:var(--a3)">${activeWB}</div></div>
+      <div class="card" style="text-align:center"><div class="stat-lbl">Transacciones</div><div class="stat-val">${txs.length}</div></div>
+      <div class="card" style="text-align:center"><div class="stat-lbl">Aforo actual</div><div class="stat-val" style="color:var(--warn)">${inside}</div></div>
+    </div>`;
+}
+
+// ════════════════════════════════════════
+//  PRODUCTS — sin prompt nativo
+// ════════════════════════════════════════
+
+
+function confirmDeleteProduct(id, name){
+  // Modal de confirmación en vez de confirm() nativo
+  document.getElementById('modal-box').innerHTML=`
+    <div class="modal-title">🗑️ Eliminar producto</div>
+    <div class="modal-sub">¿Seguro que quieres eliminar <strong style="color:var(--txt)">${name}</strong>? No se puede deshacer.</div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" style="flex:2" onclick="deleteProduct('${id}')">Sí, eliminar</button>
+    </div>`;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+async function deleteProduct(id){
+  closeModal();
+  const{error}=await _sb.from('rfid_products').delete().eq('id',id);
+  if(error){toast('Error: '+error.message);return;}
+  toast('Producto eliminado');
+  await loadProducts();
+  renderProducts(document.getElementById('page-content'));
+}
+
+// ════════════════════════════════════════
+//  CONFIG
+// ════════════════════════════════════════
+function renderConfig(pc){
+  pc.innerHTML=`<div class="g2">
+    <div class="card">
+      <div class="card-title">Evento activo</div>
+      <select class="form-select" onchange="changeEvent(this.value)">
+        ${allEvents.map(e=>`<option value="${e.id}" ${selectedEvent?.id===e.id?'selected':''}>${e.nombre}</option>`).join('')}
+      </select>
+      <div style="font-size:12px;color:var(--muted)">Productos, pulseras y transacciones se filtran por evento.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">NFC</div>
+      <div class="s-status" style="margin-bottom:12px">
+        <span class="s-status-dot ${nfcSupported?'on':'off'}"></span>
+        <span>${nfcSupported?'Web NFC activo':'Web NFC no disponible — usa UID manual'}</span>
+      </div>
+      ${!nfcSupported?'<div style="padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--warn)">⚠️ Web NFC requiere Chrome en Android con HTTPS.</div>':''}
+      <button class="btn btn-g btn-full" style="margin-top:12px" onclick="initNFC()">Reintentar NFC</button>
+    </div>
+  </div>`;
+}
+
+function changeEvent(id){
+  selectedEvent=allEvents.find(e=>e.id===id);
+  document.getElementById('tb-event').textContent=selectedEvent?.nombre||'Sin evento';
+  loadPOS(); loadProducts();
+  toast('Evento: '+selectedEvent?.nombre);
+}
 
 // ════════════════════════════════════════
 //  RESULT OVERLAY
@@ -522,23 +1659,2097 @@ function showResult(type,emoji,title,sub){
 function hideResult(){document.getElementById('result-overlay')?.remove();}
 
 // ════════════════════════════════════════
-//  AUTO-LOGIN — SIN PIN DE DISPOSITIVO
+//  AUTO-LOGIN
 // ════════════════════════════════════════
 (async function(){
-  const{data:{session}}=await _sb.auth.getSession();
-  if(session?.user){
-    currentUser=session.user;
-    const{data:p}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
-    if(p){
-      userProfile={nombre:p.nombre,role:p.role,email:p.email,id:p.id};
-      enterApp();
+  showDeviceLockScreen('RFID System','📡', async()=>{
+    const{data:{session}}=await _sb.auth.getSession();
+    if(session?.user){
+      currentUser=session.user;
+      const{data:p}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
+      if(p){userProfile={nombre:p.nombre,role:p.role,email:p.email,id:p.id};enterApp();}
+      else{ document.getElementById('login-screen').style.display='flex'; }
     } else {
       document.getElementById('login-screen').style.display='flex';
     }
-  } else {
-    document.getElementById('login-screen').style.display='flex';
-  }
+  });
 })();
+
+</script>
+
+<!-- ========================================== -->
+<!-- SISTEMA MDM - DEVICE MANAGER -->
+<!-- ========================================== -->
+<script src="lib/device-manager.js"></script>
+<script>
+let deviceManager = null
+
+async function initDeviceManager() {
+  try {
+    deviceManager = new InOutDeviceManager({
+      deviceType: 'pos',
+      appVersion: '1.2.0',
+      supabaseClient: _sb,
+      
+      onConfigLoaded: async (device) => {
+        console.log('📱 POS configurado:', device)
+        
+        if (device.event_id) {
+          const { data: event } = await _sb
+            .from('events')
+            .select('*')
+            .eq('id', device.event_id)
+            .single()
+          
+          if (event) {
+            selectedEvent = event
+            document.getElementById('tb-event').textContent = event.nombre
+          }
+        }
+        
+        if (device.location) {
+          document.title = `POS - ${device.location}`
+        }
+      },
+      
+      onCommandReceived: async (cmd, result) => {
+        toast(`Comando: ${cmd.command}`)
+      }
+    })
+    
+    await deviceManager.initialize()
+    
+  } catch (error) {
+    console.error('Error Device Manager:', error)
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  await new Promise(r => setTimeout(r, 1500))
+  await initDeviceManager()
+})
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+  MÓDULO DE TAQUILLA FÍSICA - VALID.INOUT-MEDIA.COM
+  
+  FUNCIONALIDADES:
+  ✅ Venta de entradas con comisión diferenciada (+1% vs web)
+  ✅ Impresión de tickets (recibo) y pulseras RFID
+  ✅ Lector QR/NFC para validación
+  ✅ Control de aforo en tiempo real
+  ✅ Múltiples métodos de pago (efectivo/tarjeta/mixto)
+  ✅ Cierre de caja diario
+  ✅ Sincronización con ventas web
+  
+  INTEGRACIÓN:
+  - Añadir al array NAV las nuevas secciones
+  - Añadir al PAGE_TITLES los títulos
+  - Añadir las funciones render* al switch de navigate()
+  
+══════════════════════════════════════════════════════════════════════════════ -->
+
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+//  CONFIGURACIÓN DE TAQUILLA
+// ════════════════════════════════════════════════════════════════════════════
+
+const TAQUILLA_CONFIG = {
+  // Comisiones
+  COMISION_WEB: 3.0,        // 3% para ventas web
+  COMISION_TAQUILLA: 4.0,   // 4% para ventas en taquilla física (+1%)
+  
+  // Impresión
+  TICKET_PRINTER: {
+    enabled: true,
+    port: 'usb',            // o 'bluetooth' o IP
+    modelo: 'thermal-80mm'   // Impresora térmica 80mm estándar
+  },
+  
+  WRISTBAND_PRINTER: {
+    enabled: true,
+    port: 'usb',
+    modelo: 'rfid-zebra'     // Zebra o compatible RFID
+  },
+  
+  // Hardware
+  QR_SCANNER: {
+    enabled: true,
+    autoScan: true
+  },
+  
+  NFC_READER: {
+    enabled: true,
+    autoScan: true
+  }
+};
+
+// Variables globales de taquilla
+let taquillaCart = [];
+let taquillaTotal = 0;
+let taquillaMetodoPago = 'efectivo';
+let taquillaSession = null;
+let taquillaSalesHistory = [];
+let taquillaCajaState = {
+  apertura: null,
+  efectivoInicial: 0,
+  ventasEfectivo: 0,
+  ventasTarjeta: 0,
+  ventasMixto: 0,
+  totalVentas: 0,
+  entradasVendidas: 0,
+  pulseras: 0
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  TIPOS DE ENTRADA Y PRECIOS
+// ════════════════════════════════════════════════════════════════════════════
+
+let tiposEntrada = [
+  {
+    id: 'general',
+    nombre: 'Entrada General',
+    precio: 25.00,
+    categoria: 'standard',
+    stock: 500,
+    descripcion: 'Acceso general al evento',
+    color: '#00d4ff'
+  },
+  {
+    id: 'vip',
+    nombre: 'Entrada VIP',
+    precio: 50.00,
+    categoria: 'premium',
+    stock: 100,
+    descripcion: 'Acceso VIP + zona reservada',
+    color: '#ff3cac'
+  },
+  {
+    id: 'estudiante',
+    nombre: 'Estudiante',
+    precio: 20.00,
+    categoria: 'descuento',
+    stock: 200,
+    descripcion: 'Con acreditación de estudiante',
+    color: '#c8ff00'
+  },
+  {
+    id: 'grupo',
+    nombre: 'Pack Grupo (4 pax)',
+    precio: 80.00,
+    categoria: 'pack',
+    stock: 50,
+    descripcion: '4 entradas generales',
+    color: '#ffab00'
+  }
+];
+
+// ════════════════════════════════════════════════════════════════════════════
+//  NAVEGACIÓN - AÑADIR AL NAV PRINCIPAL
+// ════════════════════════════════════════════════════════════════════════════
+
+/*
+  AÑADIR AL ARRAY NAV PRINCIPAL:
+  
+  {sec:'Taquilla Física'},
+  {key:'taquilla',icon:'🎫',label:'Venta Entradas'},
+  {key:'taquilla-scan',icon:'📱',label:'Escanear QR/NFC'},
+  {key:'taquilla-caja',icon:'💰',label:'Caja Diaria'},
+  {key:'taquilla-reportes',icon:'📊',label:'Reportes Taquilla'},
+  
+  AÑADIR AL PAGE_TITLES:
+  
+  taquilla:'Taquilla - Venta de Entradas',
+  'taquilla-scan':'Escanear y Validar',
+  'taquilla-caja':'Gestión de Caja',
+  'taquilla-reportes':'Reportes de Taquilla'
+*/
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PANTALLA 1: VENTA DE ENTRADAS
+// ════════════════════════════════════════════════════════════════════════════
+
+async function renderTaquilla(pc) {
+  // Cargar tipos de entrada desde DB si existen
+  await loadTiposEntrada();
+  
+  pc.innerHTML = `
+    <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:20px;height:calc(100vh - 120px)">
+      
+      <!-- PANEL IZQUIERDO: Catálogo de Entradas -->
+      <div style="display:flex;flex-direction:column;gap:16px;overflow-y:auto;padding-right:8px">
+        
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:24px">
+              🎫 Taquilla Física
+            </div>
+            <div style="font-size:13px;color:var(--muted);margin-top:4px">
+              Comisión taquilla: <strong style="color:var(--a1)">${TAQUILLA_CONFIG.COMISION_TAQUILLA}%</strong>
+              · Web: ${TAQUILLA_CONFIG.COMISION_WEB}%
+            </div>
+          </div>
+          <div class="badge b-green" style="font-size:13px;padding:6px 14px">
+            <span style="font-size:16px;margin-right:6px">🟢</span>
+            CAJA ABIERTA
+          </div>
+        </div>
+        
+        <!-- Info de aforo -->
+        <div class="card" style="background:rgba(0,212,255,.06);border-color:rgba(0,212,255,.2);padding:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">
+                Aforo disponible
+              </div>
+              <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a3)">
+                <span id="taq-aforo-disp">325</span>/<span style="color:var(--muted)">500</span>
+              </div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;color:var(--muted)">Vendidas hoy</div>
+              <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--a1)">
+                <span id="taq-vendidas-hoy">47</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Catálogo de entradas -->
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+          ${tiposEntrada.map(t => renderEntradaCard(t)).join('')}
+        </div>
+        
+        <!-- Botón de entrada personalizada -->
+        <button class="btn btn-g btn-full" onclick="modalEntradaPersonalizada()" 
+          style="border-style:dashed;border-width:2px">
+          ➕ Entrada personalizada
+        </button>
+        
+      </div>
+      
+      <!-- PANEL DERECHO: Carrito y Cobro -->
+      <div style="display:flex;flex-direction:column;gap:14px">
+        
+        <!-- Carrito -->
+        <div class="card" style="flex:1;display:flex;flex-direction:column">
+          <div class="card-title" style="margin-bottom:12px">
+            Carrito de venta
+            ${taquillaCart.length > 0 ? `<span style="color:var(--a1);margin-left:8px">(${taquillaCart.length})</span>` : ''}
+          </div>
+          
+          <div id="taq-cart-items" style="flex:1;overflow-y:auto;margin-bottom:14px">
+            ${renderTaquillaCart()}
+          </div>
+          
+          <!-- Subtotales -->
+          <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:auto">
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:6px">
+              <span>Subtotal</span>
+              <span id="taq-subtotal">0,00€</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--warn);margin-bottom:10px">
+              <span>Comisión taquilla (+${TAQUILLA_CONFIG.COMISION_TAQUILLA - TAQUILLA_CONFIG.COMISION_WEB}%)</span>
+              <span id="taq-comision">0,00€</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">
+                TOTAL A COBRAR
+              </span>
+              <span style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:var(--a1)" 
+                id="taq-total">0,00€</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Método de pago -->
+        <div class="card">
+          <div class="card-title">Método de pago</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div class="taq-payment-btn active" data-method="efectivo" onclick="selectPaymentMethod('efectivo')">
+              <div style="font-size:24px;margin-bottom:4px">💵</div>
+              <div style="font-size:12px;font-weight:600">Efectivo</div>
+            </div>
+            <div class="taq-payment-btn" data-method="tarjeta" onclick="selectPaymentMethod('tarjeta')">
+              <div style="font-size:24px;margin-bottom:4px">💳</div>
+              <div style="font-size:12px;font-weight:600">Tarjeta</div>
+            </div>
+            <div class="taq-payment-btn" data-method="mixto" onclick="selectPaymentMethod('mixto')">
+              <div style="font-size:24px;margin-bottom:4px">💰</div>
+              <div style="font-size:12px;font-weight:600">Mixto</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Acciones -->
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
+          <button class="btn btn-danger" onclick="clearTaquillaCart()" 
+            ${taquillaCart.length === 0 ? 'disabled style="opacity:.4"' : ''}>
+            🗑️ Limpiar
+          </button>
+          <button class="btn btn-p btn-lg" onclick="procesarVentaTaquilla()" 
+            ${taquillaCart.length === 0 ? 'disabled style="opacity:.4"' : ''}>
+            <span style="font-size:20px;margin-right:8px">💰</span>
+            COBRAR
+          </button>
+        </div>
+        
+      </div>
+      
+    </div>
+  `;
+  
+  updateTaquillaCartUI();
+}
+
+function renderEntradaCard(entrada) {
+  const stockBajo = entrada.stock < 20;
+  const agotado = entrada.stock === 0;
+  
+  return `
+    <div class="taq-entrada-card ${agotado ? 'agotado' : ''}" 
+      onclick="${agotado ? '' : `addToTaquillaCart('${entrada.id}')`}"
+      style="border-color:${entrada.color}20">
+      
+      ${agotado ? '<div class="taq-agotado-badge">AGOTADO</div>' : ''}
+      ${stockBajo && !agotado ? '<div class="taq-stock-badge">⚠️ Pocas</div>' : ''}
+      
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:15px;margin-bottom:4px">
+          ${entrada.nombre}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+          ${entrada.descripcion}
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="width:8px;height:8px;border-radius:50%;background:${entrada.color}"></div>
+          <span class="badge b-gray" style="font-size:10px">${entrada.categoria}</span>
+          <span style="font-size:10px;color:var(--muted)">Stock: ${entrada.stock}</span>
+        </div>
+      </div>
+      
+      <div style="text-align:right;margin-top:auto">
+        <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:${entrada.color}">
+          ${fmt(entrada.precio)}€
+        </div>
+        <div style="font-size:10px;color:var(--muted)">
+          +comisión
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTaquillaCart() {
+  if (taquillaCart.length === 0) {
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:20px">
+        <div style="font-size:48px;margin-bottom:12px;opacity:.5">🎫</div>
+        <div style="font-size:14px">Selecciona entradas para empezar</div>
+      </div>
+    `;
+  }
+  
+  return taquillaCart.map((item, index) => {
+    const entrada = tiposEntrada.find(t => t.id === item.id);
+    if (!entrada) return '';
+    
+    return `
+      <div class="taq-cart-item">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px;margin-bottom:2px">
+            ${entrada.nombre}
+          </div>
+          <div style="font-size:11px;color:var(--muted)">
+            ${fmt(entrada.precio)}€ × ${item.cantidad}
+          </div>
+        </div>
+        
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="taq-qty-btn" onclick="updateTaquillaQty(${index}, -1)">−</button>
+          <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;min-width:24px;text-align:center">
+            ${item.cantidad}
+          </span>
+          <button class="taq-qty-btn" onclick="updateTaquillaQty(${index}, 1)">+</button>
+        </div>
+        
+        <div style="text-align:right;margin-left:14px">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:var(--a1)">
+            ${fmt(entrada.precio * item.cantidad)}€
+          </div>
+        </div>
+        
+        <button class="btn btn-danger" style="padding:6px 10px;font-size:12px;min-height:32px;margin-left:8px" 
+          onclick="removeFromTaquillaCart(${index})">✕</button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  GESTIÓN DEL CARRITO
+// ════════════════════════════════════════════════════════════════════════════
+
+function addToTaquillaCart(entradaId) {
+  const entrada = tiposEntrada.find(t => t.id === entradaId);
+  if (!entrada || entrada.stock === 0) {
+    toast('⚠️ Entrada no disponible');
+    return;
+  }
+  
+  const existing = taquillaCart.find(item => item.id === entradaId);
+  if (existing) {
+    if (existing.cantidad >= entrada.stock) {
+      toast('⚠️ No hay más stock disponible');
+      return;
+    }
+    existing.cantidad++;
+  } else {
+    taquillaCart.push({ id: entradaId, cantidad: 1 });
+  }
+  
+  updateTaquillaCartUI();
+  if (navigator.vibrate) navigator.vibrate(50);
+}
+
+function removeFromTaquillaCart(index) {
+  taquillaCart.splice(index, 1);
+  updateTaquillaCartUI();
+}
+
+function updateTaquillaQty(index, delta) {
+  const item = taquillaCart[index];
+  const entrada = tiposEntrada.find(t => t.id === item.id);
+  
+  item.cantidad += delta;
+  
+  if (item.cantidad <= 0) {
+    removeFromTaquillaCart(index);
+    return;
+  }
+  
+  if (item.cantidad > entrada.stock) {
+    toast('⚠️ Stock insuficiente');
+    item.cantidad = entrada.stock;
+  }
+  
+  updateTaquillaCartUI();
+}
+
+function clearTaquillaCart() {
+  if (taquillaCart.length === 0) return;
+  
+  modalConfirm(
+    '🗑️ Limpiar carrito',
+    '¿Seguro que quieres vaciar el carrito actual?',
+    () => {
+      taquillaCart = [];
+      updateTaquillaCartUI();
+      toast('Carrito limpiado');
+    },
+    'Sí, limpiar',
+    false
+  );
+}
+
+function updateTaquillaCartUI() {
+  // Actualizar items del carrito
+  const cartEl = document.getElementById('taq-cart-items');
+  if (cartEl) {
+    cartEl.innerHTML = renderTaquillaCart();
+  }
+  
+  // Calcular totales
+  let subtotal = 0;
+  taquillaCart.forEach(item => {
+    const entrada = tiposEntrada.find(t => t.id === item.id);
+    if (entrada) {
+      subtotal += entrada.precio * item.cantidad;
+    }
+  });
+  
+  const comision = subtotal * (TAQUILLA_CONFIG.COMISION_TAQUILLA / 100);
+  const total = subtotal + comision;
+  
+  // Actualizar UI
+  const subtotalEl = document.getElementById('taq-subtotal');
+  const comisionEl = document.getElementById('taq-comision');
+  const totalEl = document.getElementById('taq-total');
+  
+  if (subtotalEl) subtotalEl.textContent = fmt(subtotal) + '€';
+  if (comisionEl) comisionEl.textContent = fmt(comision) + '€';
+  if (totalEl) totalEl.textContent = fmt(total) + '€';
+  
+  taquillaTotal = total;
+}
+
+function selectPaymentMethod(method) {
+  taquillaMetodoPago = method;
+  document.querySelectorAll('.taq-payment-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.querySelector(`[data-method="${method}"]`)?.classList.add('active');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PROCESAR VENTA
+// ════════════════════════════════════════════════════════════════════════════
+
+async function procesarVentaTaquilla() {
+  if (taquillaCart.length === 0) {
+    toast('⚠️ El carrito está vacío');
+    return;
+  }
+  
+  // Modal de confirmación con detalle
+  const detalleVenta = taquillaCart.map(item => {
+    const entrada = tiposEntrada.find(t => t.id === item.id);
+    return `${item.cantidad}x ${entrada.nombre}`;
+  }).join(', ');
+  
+  document.getElementById('modal-box').innerHTML = `
+    <div class="modal-title">💰 Confirmar venta</div>
+    <div class="modal-sub">Revisa los datos antes de procesar</div>
+    
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">DETALLE DE VENTA</div>
+      <div style="font-size:13px;margin-bottom:12px;line-height:1.6">
+        ${detalleVenta}
+      </div>
+      <div style="display:flex;justify-content:space-between;padding-top:12px;border-top:1px solid var(--border)">
+        <span style="font-size:13px;text-transform:uppercase;color:var(--muted)">Total</span>
+        <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--a1)">
+          ${fmt(taquillaTotal)}€
+        </span>
+      </div>
+    </div>
+    
+    <div style="background:rgba(200,255,0,.06);border:1px solid rgba(200,255,0,.15);border-radius:8px;padding:12px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+        <span>${taquillaMetodoPago === 'efectivo' ? '💵' : taquillaMetodoPago === 'tarjeta' ? '💳' : '💰'}</span>
+        <strong>Pago: ${taquillaMetodoPago.toUpperCase()}</strong>
+      </div>
+    </div>
+    
+    <div id="modal-efectivo-input" style="display:${taquillaMetodoPago === 'efectivo' || taquillaMetodoPago === 'mixto' ? 'block' : 'none'};margin-bottom:16px">
+      <label class="form-lbl">Efectivo recibido (€)</label>
+      <input class="form-input" id="efectivo-recibido" type="number" min="0" step="0.01" 
+        placeholder="${fmt(taquillaTotal)}" autocomplete="off" 
+        onkeydown="if(event.key==='Enter')confirmarVentaTaquilla()"/>
+      <div id="cambio-display" style="font-size:12px;color:var(--success);margin-top:6px;display:none">
+        Cambio: <strong id="cambio-amount">0,00€</strong>
+      </div>
+    </div>
+    
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" style="flex:2" onclick="confirmarVentaTaquilla()">
+        ✅ Confirmar venta
+      </button>
+    </div>
+  `;
+  
+  document.getElementById('modal-overlay').classList.add('show');
+  
+  // Auto-focus en input de efectivo
+  setTimeout(() => {
+    const input = document.getElementById('efectivo-recibido');
+    if (input) {
+      input.focus();
+      input.addEventListener('input', calcularCambio);
+    }
+  }, 100);
+}
+
+function calcularCambio() {
+  const recibido = parseFloat(document.getElementById('efectivo-recibido')?.value || 0);
+  const cambio = recibido - taquillaTotal;
+  const cambioDisplay = document.getElementById('cambio-display');
+  const cambioAmount = document.getElementById('cambio-amount');
+  
+  if (cambio >= 0 && recibido > 0) {
+    cambioDisplay.style.display = 'block';
+    cambioAmount.textContent = fmt(cambio) + '€';
+    cambioAmount.style.color = cambio === 0 ? 'var(--success)' : 'var(--a1)';
+  } else {
+    cambioDisplay.style.display = 'none';
+  }
+}
+
+async function confirmarVentaTaquilla() {
+  const btn = document.querySelector('#modal-box .btn-p');
+  if (!btn) return;
+  
+  // Validar efectivo si es necesario
+  if (taquillaMetodoPago === 'efectivo' || taquillaMetodoPago === 'mixto') {
+    const recibido = parseFloat(document.getElementById('efectivo-recibido')?.value || 0);
+    if (recibido < taquillaTotal) {
+      toast('⚠️ El efectivo recibido es insuficiente');
+      return;
+    }
+  }
+  
+  btn.disabled = true;
+  btn.textContent = 'Procesando...';
+  
+  try {
+    // Generar datos de la venta
+    const venta = {
+      fecha: new Date().toISOString(),
+      items: taquillaCart.map(item => {
+        const entrada = tiposEntrada.find(t => t.id === item.id);
+        return {
+          tipo_entrada_id: entrada.id,
+          nombre: entrada.nombre,
+          precio_unitario: entrada.precio,
+          cantidad: item.cantidad,
+          subtotal: entrada.precio * item.cantidad
+        };
+      }),
+      subtotal: taquillaTotal / (1 + TAQUILLA_CONFIG.COMISION_TAQUILLA / 100),
+      comision: taquillaTotal - (taquillaTotal / (1 + TAQUILLA_CONFIG.COMISION_TAQUILLA / 100)),
+      total: taquillaTotal,
+      metodo_pago: taquillaMetodoPago,
+      operador: userProfile.nombre,
+      event_id: selectedEvent?.id,
+      canal: 'taquilla_fisica',
+      pulseras_emitidas: taquillaCart.reduce((sum, item) => sum + item.cantidad, 0)
+    };
+    
+    // Guardar en base de datos
+    const { data, error } = await _sb
+      .from('rfid_ticket_sales')
+      .insert(venta)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // Actualizar stocks
+    for (const item of taquillaCart) {
+      const entrada = tiposEntrada.find(t => t.id === item.id);
+      entrada.stock -= item.cantidad;
+    }
+    
+    // Actualizar caja
+    if (taquillaMetodoPago === 'efectivo') {
+      taquillaCajaState.ventasEfectivo += taquillaTotal;
+    } else if (taquillaMetodoPago === 'tarjeta') {
+      taquillaCajaState.ventasTarjeta += taquillaTotal;
+    } else {
+      taquillaCajaState.ventasMixto += taquillaTotal;
+    }
+    taquillaCajaState.totalVentas += taquillaTotal;
+    taquillaCajaState.entradasVendidas += venta.pulseras_emitidas;
+    
+    // Guardar en historial
+    taquillaSalesHistory.unshift(venta);
+    
+    closeModal();
+    
+    // Mostrar resultado e imprimir
+    await mostrarResultadoVenta(venta, data.id);
+    
+    // Limpiar carrito
+    taquillaCart = [];
+    
+    // Refrescar pantalla
+    renderTaquilla(document.getElementById('page-content'));
+    
+  } catch (error) {
+    console.error('Error procesando venta:', error);
+    toast('❌ Error procesando la venta: ' + error.message);
+    btn.disabled = false;
+    btn.textContent = '✅ Confirmar venta';
+  }
+}
+
+async function mostrarResultadoVenta(venta, ventaId) {
+  // Pantalla de éxito
+  showResult('success', '✅', 
+    `Venta procesada: ${fmt(venta.total)}€`,
+    `${venta.pulseras_emitidas} entrada(s) · ${venta.metodo_pago.toUpperCase()}`
+  );
+  
+  // Esperar 1 segundo y mostrar opciones de impresión
+  setTimeout(() => {
+    hideResult();
+    mostrarOpcionesImpresion(venta, ventaId);
+  }, 1500);
+}
+
+function mostrarOpcionesImpresion(venta, ventaId) {
+  document.getElementById('modal-box').innerHTML = `
+    <div class="modal-title">🖨️ Imprimir documentos</div>
+    <div class="modal-sub">Selecciona qué deseas imprimir</div>
+    
+    <div style="background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.15);border-radius:10px;padding:14px;margin-bottom:16px;text-align:center">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">
+        Venta #${ventaId}
+      </div>
+      <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--success)">
+        ${venta.pulseras_emitidas} entrada(s)
+      </div>
+    </div>
+    
+    <div style="display:grid;gap:10px;margin-bottom:16px">
+      <div class="taq-print-option" onclick="imprimirTicket(${JSON.stringify(venta).replace(/"/g, '&quot;')}, ${ventaId})">
+        <div style="font-size:32px;margin-bottom:6px">🧾</div>
+        <div style="font-weight:600;margin-bottom:4px">Ticket de compra</div>
+        <div style="font-size:11px;color:var(--muted)">Recibo para el cliente</div>
+      </div>
+      
+      <div class="taq-print-option" onclick="imprimirPulseras(${JSON.stringify(venta).replace(/"/g, '&quot;')}, ${ventaId})">
+        <div style="font-size:32px;margin-bottom:6px">📛</div>
+        <div style="font-weight:600;margin-bottom:4px">Pulseras RFID</div>
+        <div style="font-size:11px;color:var(--muted)">${venta.pulseras_emitidas} pulsera(s) con QR/NFC</div>
+      </div>
+      
+      <div class="taq-print-option" onclick="imprimirTodo(${JSON.stringify(venta).replace(/"/g, '&quot;')}, ${ventaId})">
+        <div style="font-size:32px;margin-bottom:6px">🖨️</div>
+        <div style="font-weight:600;margin-bottom:4px">Imprimir todo</div>
+        <div style="font-size:11px;color:var(--muted)">Ticket + Pulseras</div>
+      </div>
+    </div>
+    
+    <button class="btn btn-g btn-full" onclick="closeModal()">
+      Omitir impresión
+    </button>
+  `;
+  
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  IMPRESIÓN DE TICKETS Y PULSERAS
+// ════════════════════════════════════════════════════════════════════════════
+
+async function imprimirTicket(venta, ventaId) {
+  toast('🖨️ Imprimiendo ticket...');
+  
+  // Generar contenido del ticket (formato ESC/POS para impresoras térmicas)
+  const ticketData = generarTicketESCPOS(venta, ventaId);
+  
+  // Enviar a impresora (integración real aquí)
+  try {
+    // Simulación - en producción conectar con la impresora física
+    console.log('TICKET DATA:', ticketData);
+    
+    // Si hay navegador con Web Serial API (Chrome)
+    if ('serial' in navigator) {
+      await enviarAImpresoraSerial(ticketData, 'ticket');
+    } else {
+      // Fallback: descargar como archivo
+      descargarTicketTXT(venta, ventaId);
+    }
+    
+    toast('✅ Ticket impreso');
+    closeModal();
+  } catch (error) {
+    console.error('Error imprimiendo:', error);
+    toast('⚠️ Error de impresión - guardando copia');
+    descargarTicketTXT(venta, ventaId);
+  }
+}
+
+async function imprimirPulseras(venta, ventaId) {
+  toast('🖨️ Imprimiendo pulseras RFID...');
+  
+  try {
+    // Generar códigos únicos para cada pulsera
+    const pulseras = [];
+    let totalPulseras = 0;
+    
+    for (const item of venta.items) {
+      for (let i = 0; i < item.cantidad; i++) {
+        const codigo = generarCodigoPulsera(ventaId, totalPulseras);
+        pulseras.push({
+          codigo,
+          tipo: item.nombre,
+          venta_id: ventaId,
+          qr_data: codigo
+        });
+        totalPulseras++;
+      }
+    }
+    
+    // Registrar pulseras en BD
+    const { error } = await _sb
+      .from('rfid_wristbands')
+      .insert(pulseras.map(p => ({
+        uid: p.codigo,
+        event_id: selectedEvent?.id,
+        ticket_sale_id: ventaId,
+        status: 'active',
+        balance: 0,
+        registered_by: userProfile.nombre,
+        registered_at: new Date().toISOString()
+      })));
+    
+    if (error) throw error;
+    
+    // Enviar a impresora de pulseras
+    if ('serial' in navigator) {
+      await enviarAImpresoraSerial(pulseras, 'pulseras');
+    } else {
+      descargarPulserasPDF(pulseras, venta);
+    }
+    
+    toast(`✅ ${pulseras.length} pulsera(s) impresa(s)`);
+    closeModal();
+    
+  } catch (error) {
+    console.error('Error imprimiendo pulseras:', error);
+    toast('⚠️ Error imprimiendo pulseras');
+  }
+}
+
+async function imprimirTodo(venta, ventaId) {
+  await imprimirTicket(venta, ventaId);
+  setTimeout(async () => {
+    await imprimirPulseras(venta, ventaId);
+  }, 1000);
+}
+
+function generarCodigoPulsera(ventaId, index) {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `TAQ-${ventaId}-${index}-${timestamp}-${random}`;
+}
+
+function generarTicketESCPOS(venta, ventaId) {
+  const linea = '--------------------------------';
+  const fecha = new Date(venta.fecha).toLocaleString('es-ES');
+  
+  let ticket = `
+${linea}
+   INOUT MEDIA - TAQUILLA
+${linea}
+
+Ticket: #${ventaId}
+Fecha: ${fecha}
+Operador: ${venta.operador}
+Evento: ${selectedEvent?.nombre || 'Sin evento'}
+
+${linea}
+DETALLE DE COMPRA
+${linea}
+
+`;
+  
+  venta.items.forEach(item => {
+    const nombre = item.nombre.padEnd(20);
+    const precio = fmt(item.precio_unitario) + '€';
+    const cant = `x${item.cantidad}`;
+    const total = fmt(item.subtotal) + '€';
+    
+    ticket += `${nombre}\n`;
+    ticket += `  ${cant} ${precio.padStart(10)} ${total.padStart(10)}\n\n`;
+  });
+  
+  ticket += `${linea}\n`;
+  ticket += `Subtotal:${fmt(venta.subtotal).padStart(20)}€\n`;
+  ticket += `Comisión:${fmt(venta.comision).padStart(20)}€\n`;
+  ticket += `${linea}\n`;
+  ticket += `TOTAL:${fmt(venta.total).padStart(23)}€\n`;
+  ticket += `${linea}\n\n`;
+  ticket += `Pago: ${venta.metodo_pago.toUpperCase()}\n`;
+  ticket += `Pulseras emitidas: ${venta.pulseras_emitidas}\n\n`;
+  ticket += `${linea}\n`;
+  ticket += `    ¡Gracias por tu compra!\n`;
+  ticket += `     www.inout-media.com\n`;
+  ticket += `${linea}\n\n\n`;
+  
+  return ticket;
+}
+
+function descargarTicketTXT(venta, ventaId) {
+  const contenido = generarTicketESCPOS(venta, ventaId);
+  const blob = new Blob([contenido], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ticket-${ventaId}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function descargarPulserasPDF(pulseras, venta) {
+  // Generar HTML para imprimir pulseras con QR
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Pulseras - Venta ${venta.id}</title>
+      <style>
+        @page { size: 80mm 40mm; margin: 0; }
+        body { margin: 0; padding: 0; font-family: Arial; }
+        .pulsera { 
+          width: 80mm; height: 40mm; 
+          page-break-after: always;
+          display: flex; align-items: center; justify-content: center;
+          border: 1px solid #000; padding: 5mm;
+        }
+        .pulsera-content { text-align: center; }
+        .codigo { font-size: 8pt; font-family: monospace; margin-top: 3mm; }
+        .tipo { font-size: 10pt; font-weight: bold; margin-bottom: 2mm; }
+      </style>
+    </head>
+    <body>
+      ${pulseras.map(p => `
+        <div class="pulsera">
+          <div class="pulsera-content">
+            <div class="tipo">${p.tipo}</div>
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(p.qr_data)}" width="120"/>
+            <div class="codigo">${p.codigo}</div>
+          </div>
+        </div>
+      `).join('')}
+    </body>
+    </html>
+  `;
+  
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+}
+
+async function enviarAImpresoraSerial(data, tipo) {
+  // Implementación real con Web Serial API
+  // Por ahora simular
+  console.log(`Enviando a impresora ${tipo}:`, data);
+  await new Promise(r => setTimeout(r, 500));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  FUNCIONES AUXILIARES
+// ════════════════════════════════════════════════════════════════════════════
+
+async function loadTiposEntrada() {
+  if (!selectedEvent) return;
+  
+  try {
+    const { data } = await _sb
+      .from('rfid_ticket_types')
+      .select('*')
+      .eq('event_id', selectedEvent.id)
+      .eq('active', true)
+      .order('sort_order');
+    
+    if (data && data.length > 0) {
+      tiposEntrada = data.map(t => ({
+        id: t.id,
+        nombre: t.name,
+        precio: parseFloat(t.price),
+        categoria: t.category || 'general',
+        stock: t.stock || 0,
+        descripcion: t.description || '',
+        color: t.color || '#00d4ff'
+      }));
+    }
+  } catch (error) {
+    console.log('Usando tipos de entrada por defecto');
+  }
+}
+
+function modalEntradaPersonalizada() {
+  document.getElementById('modal-box').innerHTML = `
+    <div class="modal-title">➕ Entrada personalizada</div>
+    <div class="modal-sub">Para casos especiales (invitaciones, cortesías, etc.)</div>
+    
+    <label class="form-lbl">Nombre de la entrada</label>
+    <input class="form-input" id="ep-nombre" placeholder="Ej: Cortesía Prensa"/>
+    
+    <label class="form-lbl">Precio (€)</label>
+    <input class="form-input" id="ep-precio" type="number" min="0" step="0.01" placeholder="0.00"/>
+    
+    <label class="form-lbl">Cantidad</label>
+    <input class="form-input" id="ep-cantidad" type="number" min="1" value="1"/>
+    
+    <div style="display:flex;gap:10px;margin-top:4px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-p" style="flex:2" onclick="agregarEntradaPersonalizada()">Añadir</button>
+    </div>
+  `;
+  
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(() => document.getElementById('ep-nombre')?.focus(), 100);
+}
+
+function agregarEntradaPersonalizada() {
+  const nombre = document.getElementById('ep-nombre')?.value?.trim();
+  const precio = parseFloat(document.getElementById('ep-precio')?.value || 0);
+  const cantidad = parseInt(document.getElementById('ep-cantidad')?.value || 1);
+  
+  if (!nombre) {
+    toast('⚠️ Introduce un nombre');
+    return;
+  }
+  
+  const customId = 'custom-' + Date.now();
+  tiposEntrada.push({
+    id: customId,
+    nombre,
+    precio,
+    categoria: 'personalizada',
+    stock: cantidad,
+    descripcion: 'Entrada personalizada',
+    color: '#ffab00'
+  });
+  
+  addToTaquillaCart(customId);
+  closeModal();
+  renderTaquilla(document.getElementById('page-content'));
+}
+
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════════════════════
+  ESTILOS CSS PARA TAQUILLA
+══════════════════════════════════════════════════════════════════════════════ -->
+
+<style>
+/* Tarjetas de entrada */
+.taq-entrada-card {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all .15s;
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
+  position: relative;
+  user-select: none;
+}
+
+.taq-entrada-card:not(.agotado):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.2);
+}
+
+.taq-entrada-card:not(.agotado):active {
+  transform: scale(.98);
+}
+
+.taq-entrada-card.agotado {
+  opacity: .4;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+.taq-agotado-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255,23,68,.15);
+  color: var(--danger);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.taq-stock-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255,171,0,.15);
+  color: var(--warn);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Items del carrito */
+.taq-cart-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  transition: all .12s;
+}
+
+.taq-cart-item:hover {
+  border-color: var(--a1);
+}
+
+.taq-qty-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surf);
+  color: var(--txt);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.taq-qty-btn:hover {
+  border-color: var(--a1);
+  background: rgba(200,255,0,.1);
+}
+
+.taq-qty-btn:active {
+  transform: scale(.9);
+}
+
+/* Botones de método de pago */
+.taq-payment-btn {
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: var(--card);
+  text-align: center;
+  cursor: pointer;
+  transition: all .15s;
+  user-select: none;
+}
+
+.taq-payment-btn:hover {
+  border-color: var(--a1);
+  background: rgba(200,255,0,.05);
+}
+
+.taq-payment-btn.active {
+  border-color: var(--a1);
+  background: rgba(200,255,0,.1);
+}
+
+.taq-payment-btn:active {
+  transform: scale(.96);
+}
+
+/* Opciones de impresión */
+.taq-print-option {
+  padding: 20px;
+  border-radius: 14px;
+  border: 2px solid var(--border);
+  background: var(--card);
+  text-align: center;
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.taq-print-option:hover {
+  border-color: var(--a1);
+  background: rgba(200,255,0,.06);
+  transform: translateY(-2px);
+}
+
+.taq-print-option:active {
+  transform: scale(.98);
+}
+
+@media (max-width: 768px) {
+  .taq-entrada-card {
+    min-height: auto;
+  }
+}
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+  MÓDULO DE TAQUILLA - PANTALLAS COMPLEMENTARIAS
+  
+  - Escaneo y validación QR/NFC
+  - Gestión de caja diaria
+  - Reportes de taquilla
+  
+══════════════════════════════════════════════════════════════════════════════ -->
+
+<script>
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PANTALLA 2: ESCANEAR Y VALIDAR (QR/NFC)
+// ════════════════════════════════════════════════════════════════════════════
+
+let scannerActive = false;
+let lastValidation = null;
+
+async function renderTaquillaScan(pc) {
+  pc.innerHTML = `
+    <div style="max-width:600px;margin:0 auto">
+      
+      <!-- Header -->
+      <div style="text-align:center;margin-bottom:24px">
+        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:28px;margin-bottom:6px">
+          📱 Escanear y Validar
+        </div>
+        <div style="font-size:14px;color:var(--muted)">
+          Valida entradas con QR o pulseras NFC
+        </div>
+      </div>
+      
+      <!-- Stats rápidas -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">
+            Escaneadas hoy
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--success)" 
+            id="scan-validadas">0</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">
+            Rechazadas
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--danger)" 
+            id="scan-rechazadas">0</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">
+            Dentro ahora
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--a3)" 
+            id="scan-dentro">0</div>
+        </div>
+      </div>
+      
+      <!-- Área de escaneo -->
+      <div class="card" style="padding:40px;text-align:center">
+        <div class="nfc-ring scanning" id="scan-ring" 
+          style="width:200px;height:200px;margin:0 auto">
+          <span class="emoji" style="font-size:64px">📡</span>
+        </div>
+        
+        <div class="nfc-label" style="margin-top:24px;font-size:20px" id="scan-label">
+          Esperando escaneo
+        </div>
+        
+        <div class="nfc-sub" style="font-size:14px;margin-top:8px" id="scan-sub">
+          Acerca el código QR o pulsera NFC
+        </div>
+        
+        <div style="display:flex;gap:10px;margin-top:24px;justify-content:center">
+          <button class="btn btn-g" onclick="activarCamara()">
+            📷 Activar cámara QR
+          </button>
+          <button class="btn btn-g" onclick="manualUIDInput()">
+            ⌨️ Código manual
+          </button>
+        </div>
+        
+        <!-- Video preview para QR scanner -->
+        <div id="qr-video-container" style="display:none;margin-top:20px">
+          <video id="qr-video" style="width:100%;max-width:400px;border-radius:10px"></video>
+        </div>
+      </div>
+      
+      <!-- Última validación -->
+      <div id="last-validation" style="display:none;margin-top:20px">
+        <!-- Se rellena dinámicamente -->
+      </div>
+      
+      <!-- Log de validaciones -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-title">Últimas validaciones</div>
+        <div id="scan-log" style="max-height:300px;overflow-y:auto">
+          <div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">
+            Sin validaciones recientes
+          </div>
+        </div>
+      </div>
+      
+    </div>
+  `;
+  
+  // Activar NFC automático
+  if (nfcSupported && !scannerActive) {
+    activarNFCScanner();
+  }
+  
+  loadScanStats();
+}
+
+function activarNFCScanner() {
+  scannerActive = true;
+  const label = document.getElementById('scan-label');
+  const sub = document.getElementById('scan-sub');
+  
+  if (label) label.textContent = 'Lector NFC activo';
+  if (sub) sub.textContent = 'Acerca la pulsera NFC al lector';
+  
+  toast('📡 Lector NFC activado');
+}
+
+async function activarCamara() {
+  const container = document.getElementById('qr-video-container');
+  const video = document.getElementById('qr-video');
+  
+  if (!container || !video) return;
+  
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'environment' } 
+    });
+    
+    video.srcObject = stream;
+    video.play();
+    container.style.display = 'block';
+    
+    toast('📷 Cámara activada - escanea el código QR');
+    
+    // Iniciar detección QR (requiere librería jsQR o similar)
+    // Por ahora simulación
+    
+  } catch (error) {
+    toast('❌ No se pudo acceder a la cámara');
+    console.error(error);
+  }
+}
+
+async function validarEntrada(codigo) {
+  const ring = document.getElementById('scan-ring');
+  const label = document.getElementById('scan-label');
+  const sub = document.getElementById('scan-sub');
+  
+  if (!ring || !label || !sub) return;
+  
+  ring.className = 'nfc-ring';
+  label.textContent = 'Validando...';
+  sub.textContent = '';
+  
+  try {
+    // Buscar pulsera/entrada por código
+    const { data: entrada, error } = await _sb
+      .from('rfid_wristbands')
+      .select('*, rfid_ticket_sales(*)')
+      .eq('uid', codigo)
+      .eq('event_id', selectedEvent?.id)
+      .single();
+    
+    if (error || !entrada) {
+      // Entrada no encontrada
+      mostrarValidacionError('NO ENCONTRADA', codigo);
+      return;
+    }
+    
+    if (entrada.status !== 'active') {
+      // Pulsera bloqueada
+      mostrarValidacionError('BLOQUEADA', codigo);
+      return;
+    }
+    
+    // Verificar si ya entró
+    const { data: accesos } = await _sb
+      .from('rfid_access_log')
+      .select('*')
+      .eq('wristband_id', entrada.id)
+      .eq('event_id', selectedEvent?.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    if (accesos && accesos.length > 0 && accesos[0].direction === 'in') {
+      // Ya está dentro - registrar salida
+      await registrarAcceso(entrada.id, 'out');
+      mostrarValidacionExito('SALIDA REGISTRADA', entrada, codigo);
+    } else {
+      // Registrar entrada
+      await registrarAcceso(entrada.id, 'in');
+      mostrarValidacionExito('ACCESO CONCEDIDO', entrada, codigo);
+    }
+    
+  } catch (error) {
+    console.error('Error validando:', error);
+    mostrarValidacionError('ERROR DEL SISTEMA', codigo);
+  }
+}
+
+function mostrarValidacionExito(titulo, entrada, codigo) {
+  const ring = document.getElementById('scan-ring');
+  const label = document.getElementById('scan-label');
+  const sub = document.getElementById('scan-sub');
+  
+  ring.className = 'nfc-ring success';
+  ring.querySelector('.emoji').textContent = '✅';
+  label.textContent = titulo;
+  sub.textContent = codigo;
+  sub.style.color = 'var(--success)';
+  
+  if (navigator.vibrate) navigator.vibrate(100);
+  
+  // Mostrar pantalla completa de éxito
+  showAccessResult(true, titulo, entrada.holder_name || codigo, entrada.balance);
+  
+  // Log
+  agregarLogValidacion(true, titulo, codigo);
+  
+  // Reset después de 2 segundos
+  setTimeout(resetScanScreen, 2000);
+}
+
+function mostrarValidacionError(razon, codigo) {
+  const ring = document.getElementById('scan-ring');
+  const label = document.getElementById('scan-label');
+  const sub = document.getElementById('scan-sub');
+  
+  ring.className = 'nfc-ring error';
+  ring.querySelector('.emoji').textContent = '❌';
+  label.textContent = razon;
+  sub.textContent = codigo;
+  sub.style.color = 'var(--danger)';
+  
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  
+  // Mostrar pantalla completa de error
+  showAccessResult(false, razon, codigo);
+  
+  // Log
+  agregarLogValidacion(false, razon, codigo);
+  
+  // Reset después de 3 segundos
+  setTimeout(resetScanScreen, 3000);
+}
+
+function resetScanScreen() {
+  const ring = document.getElementById('scan-ring');
+  const label = document.getElementById('scan-label');
+  const sub = document.getElementById('scan-sub');
+  
+  if (ring) {
+    ring.className = 'nfc-ring scanning';
+    ring.querySelector('.emoji').textContent = '📡';
+  }
+  if (label) label.textContent = 'Esperando escaneo';
+  if (sub) {
+    sub.textContent = 'Acerca el código QR o pulsera NFC';
+    sub.style.color = 'var(--muted)';
+  }
+}
+
+async function registrarAcceso(wristbandId, direction) {
+  await _sb.from('rfid_access_log').insert({
+    wristband_id: wristbandId,
+    event_id: selectedEvent?.id,
+    direction: direction,
+    gate: 'Taquilla Principal',
+    operator: userProfile.nombre,
+    created_at: new Date().toISOString()
+  });
+  
+  loadScanStats();
+}
+
+function agregarLogValidacion(exito, tipo, codigo) {
+  const log = document.getElementById('scan-log');
+  if (!log) return;
+  
+  const hora = new Date().toLocaleTimeString('es-ES', { 
+    hour: '2-digit', 
+    minute: '2-digit',
+    second: '2-digit'
+  });
+  
+  const item = document.createElement('div');
+  item.className = 'scan-log-item';
+  item.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid rgba(255,255,255,.04)">
+      <div style="font-size:24px">${exito ? '✅' : '❌'}</div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:13px;color:${exito ? 'var(--success)' : 'var(--danger)'}">
+          ${tipo}
+        </div>
+        <div style="font-size:11px;color:var(--muted);font-family:monospace">${codigo}</div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">${hora}</div>
+    </div>
+  `;
+  
+  // Insertar al principio
+  if (log.firstChild) {
+    log.insertBefore(item, log.firstChild);
+  } else {
+    log.innerHTML = '';
+    log.appendChild(item);
+  }
+  
+  // Limitar a 20 items
+  const items = log.querySelectorAll('.scan-log-item');
+  if (items.length > 20) {
+    items[items.length - 1].remove();
+  }
+}
+
+async function loadScanStats() {
+  if (!selectedEvent) return;
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const { data: logs } = await _sb
+    .from('rfid_access_log')
+    .select('direction')
+    .eq('event_id', selectedEvent.id)
+    .gte('created_at', today.toISOString());
+  
+  if (!logs) return;
+  
+  const entradas = logs.filter(l => l.direction === 'in').length;
+  const salidas = logs.filter(l => l.direction === 'out').length;
+  const dentro = Math.max(0, entradas - salidas);
+  
+  const validEl = document.getElementById('scan-validadas');
+  const dentroEl = document.getElementById('scan-dentro');
+  
+  if (validEl) validEl.textContent = entradas;
+  if (dentroEl) dentroEl.textContent = dentro;
+}
+
+// Hook para NFC en esta pantalla
+function onTaquillaScanNFC(uid) {
+  if (currentPage === 'taquilla-scan') {
+    validarEntrada(uid);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PANTALLA 3: GESTIÓN DE CAJA
+// ════════════════════════════════════════════════════════════════════════════
+
+async function renderTaquillaCaja(pc) {
+  // Cargar estado de caja
+  await loadCajaState();
+  
+  const cajaAbierta = taquillaCajaState.apertura !== null;
+  const totalEfectivo = taquillaCajaState.efectivoInicial + taquillaCajaState.ventasEfectivo;
+  
+  pc.innerHTML = `
+    <div style="max-width:800px;margin:0 auto">
+      
+      <!-- Header con estado -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:28px">
+            💰 Gestión de Caja
+          </div>
+          <div style="font-size:13px;color:var(--muted);margin-top:4px">
+            Operador: <strong>${userProfile.nombre}</strong>
+          </div>
+        </div>
+        <div class="badge ${cajaAbierta ? 'b-green' : 'b-red'}" 
+          style="font-size:14px;padding:8px 16px">
+          <span style="font-size:18px;margin-right:6px">${cajaAbierta ? '🟢' : '🔴'}</span>
+          ${cajaAbierta ? 'CAJA ABIERTA' : 'CAJA CERRADA'}
+        </div>
+      </div>
+      
+      ${!cajaAbierta ? renderAperturaCaja() : renderCajaActiva(totalEfectivo)}
+      
+    </div>
+  `;
+}
+
+function renderAperturaCaja() {
+  return `
+    <div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:64px;margin-bottom:16px">🔒</div>
+      <div style="font-family:'Syne',sans-serif;font-size:24px;font-weight:700;margin-bottom:8px">
+        Caja cerrada
+      </div>
+      <div style="font-size:14px;color:var(--muted);margin-bottom:24px">
+        Abre la caja para comenzar las operaciones de taquilla
+      </div>
+      
+      <div style="max-width:300px;margin:0 auto">
+        <label class="form-lbl">Efectivo inicial en caja (€)</label>
+        <input class="form-input" id="efectivo-inicial" type="number" min="0" step="0.01" 
+          placeholder="100.00" value="100.00" autocomplete="off"
+          onkeydown="if(event.key==='Enter')abrirCaja()"/>
+        
+        <button class="btn btn-p btn-full btn-lg" style="margin-top:14px" 
+          onclick="abrirCaja()">
+          🔓 Abrir caja
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderCajaActiva(totalEfectivo) {
+  const apertura = new Date(taquillaCajaState.apertura).toLocaleString('es-ES');
+  
+  return `
+    <!-- Resumen de caja -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+      <div class="card" style="text-align:center;padding:20px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+          Total ventas
+        </div>
+        <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:var(--a1)">
+          ${fmt(taquillaCajaState.totalVentas)}€
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          ${taquillaCajaState.entradasVendidas} entrada(s)
+        </div>
+      </div>
+      
+      <div class="card" style="text-align:center;padding:20px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+          Efectivo en caja
+        </div>
+        <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:var(--success)">
+          ${fmt(totalEfectivo)}€
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          Inicial: ${fmt(taquillaCajaState.efectivoInicial)}€
+        </div>
+      </div>
+      
+      <div class="card" style="text-align:center;padding:20px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+          Tarjeta
+        </div>
+        <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:var(--a3)">
+          ${fmt(taquillaCajaState.ventasTarjeta)}€
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          + ${fmt(taquillaCajaState.ventasMixto)}€ mixto
+        </div>
+      </div>
+    </div>
+    
+    <!-- Desglose por método de pago -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-title">Desglose de ventas</div>
+      
+      <div style="display:grid;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg);border-radius:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">💵</span>
+            <span>Efectivo</span>
+          </div>
+          <span style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--success)">
+            ${fmt(taquillaCajaState.ventasEfectivo)}€
+          </span>
+        </div>
+        
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg);border-radius:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">💳</span>
+            <span>Tarjeta</span>
+          </div>
+          <span style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--a3)">
+            ${fmt(taquillaCajaState.ventasTarjeta)}€
+          </span>
+        </div>
+        
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg);border-radius:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">💰</span>
+            <span>Mixto</span>
+          </div>
+          <span style="font-family:'Syne',sans-serif;font-size:20px;font-weight:700;color:var(--warn)">
+            ${fmt(taquillaCajaState.ventasMixto)}€
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Info de apertura -->
+    <div class="card" style="margin-bottom:20px;background:rgba(0,212,255,.05);border-color:rgba(0,212,255,.2)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">
+            Caja abierta
+          </div>
+          <div style="font-size:14px;font-weight:600">${apertura}</div>
+        </div>
+        <button class="btn btn-danger" onclick="confirmarCierreCaja()">
+          🔒 Cerrar caja
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+async function abrirCaja() {
+  const inicial = parseFloat(document.getElementById('efectivo-inicial')?.value || 0);
+  
+  if (inicial < 0) {
+    toast('⚠️ Introduce un valor válido');
+    return;
+  }
+  
+  taquillaCajaState = {
+    apertura: new Date().toISOString(),
+    efectivoInicial: inicial,
+    ventasEfectivo: 0,
+    ventasTarjeta: 0,
+    ventasMixto: 0,
+    totalVentas: 0,
+    entradasVendidas: 0,
+    pulseras: 0
+  };
+  
+  // Guardar en BD
+  await saveCajaState();
+  
+  toast('✅ Caja abierta con ' + fmt(inicial) + '€');
+  renderTaquillaCaja(document.getElementById('page-content'));
+}
+
+function confirmarCierreCaja() {
+  const totalEfectivo = taquillaCajaState.efectivoInicial + taquillaCajaState.ventasEfectivo;
+  
+  document.getElementById('modal-box').innerHTML = `
+    <div class="modal-title">🔒 Cerrar caja</div>
+    <div class="modal-sub">Revisa el recuento antes de cerrar</div>
+    
+    <div class="card" style="background:var(--bg);padding:16px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--muted);text-transform:uppercase;margin-bottom:12px">
+        RESUMEN DEL DÍA
+      </div>
+      
+      <div style="display:grid;gap:8px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span style="color:var(--muted)">Efectivo inicial</span>
+          <span>${fmt(taquillaCajaState.efectivoInicial)}€</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span style="color:var(--muted)">Ventas en efectivo</span>
+          <span style="color:var(--success)">+${fmt(taquillaCajaState.ventasEfectivo)}€</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding-top:8px;border-top:1px solid var(--border)">
+          <strong>Efectivo esperado</strong>
+          <strong style="color:var(--a1)">${fmt(totalEfectivo)}€</strong>
+        </div>
+      </div>
+      
+      <div style="display:grid;gap:8px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span style="color:var(--muted)">Ventas tarjeta</span>
+          <span>${fmt(taquillaCajaState.ventasTarjeta)}€</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span style="color:var(--muted)">Ventas mixto</span>
+          <span>${fmt(taquillaCajaState.ventasMixto)}€</span>
+        </div>
+      </div>
+      
+      <div style="display:flex;justify-content:space-between;padding-top:12px;border-top:1px solid var(--border);margin-top:12px">
+        <span style="text-transform:uppercase;font-size:13px;color:var(--muted)">Total ventas</span>
+        <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--a1)">
+          ${fmt(taquillaCajaState.totalVentas)}€
+        </span>
+      </div>
+      
+      <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        ${taquillaCajaState.entradasVendidas} entrada(s) vendida(s)
+      </div>
+    </div>
+    
+    <label class="form-lbl">Efectivo real contado (€)</label>
+    <input class="form-input" id="efectivo-real" type="number" min="0" step="0.01" 
+      placeholder="${fmt(totalEfectivo)}" autocomplete="off"/>
+    
+    <div id="diferencia-caja" style="display:none;padding:10px 14px;border-radius:8px;margin-top:10px;font-size:13px">
+      <!-- Se muestra si hay diferencia -->
+    </div>
+    
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" style="flex:2" onclick="ejecutarCierreCaja()">
+        🔒 Cerrar caja
+      </button>
+    </div>
+  `;
+  
+  document.getElementById('modal-overlay').classList.add('show');
+  
+  setTimeout(() => {
+    const input = document.getElementById('efectivo-real');
+    if (input) {
+      input.focus();
+      input.addEventListener('input', calcularDiferenciaCaja);
+    }
+  }, 100);
+}
+
+function calcularDiferenciaCaja() {
+  const real = parseFloat(document.getElementById('efectivo-real')?.value || 0);
+  const esperado = taquillaCajaState.efectivoInicial + taquillaCajaState.ventasEfectivo;
+  const diferencia = real - esperado;
+  const difDiv = document.getElementById('diferencia-caja');
+  
+  if (!difDiv) return;
+  
+  if (Math.abs(diferencia) > 0.01) {
+    difDiv.style.display = 'block';
+    
+    if (diferencia > 0) {
+      difDiv.style.background = 'rgba(0,230,118,.1)';
+      difDiv.style.border = '1px solid rgba(0,230,118,.2)';
+      difDiv.style.color = 'var(--success)';
+      difDiv.innerHTML = `✅ Sobrante: <strong>+${fmt(diferencia)}€</strong>`;
+    } else {
+      difDiv.style.background = 'rgba(255,23,68,.1)';
+      difDiv.style.border = '1px solid rgba(255,23,68,.2)';
+      difDiv.style.color = 'var(--danger)';
+      difDiv.innerHTML = `⚠️ Faltante: <strong>${fmt(diferencia)}€</strong>`;
+    }
+  } else {
+    difDiv.style.display = 'none';
+  }
+}
+
+async function ejecutarCierreCaja() {
+  const real = parseFloat(document.getElementById('efectivo-real')?.value || 0);
+  const esperado = taquillaCajaState.efectivoInicial + taquillaCajaState.ventasEfectivo;
+  const diferencia = real - esperado;
+  
+  // Guardar cierre en BD
+  const cierre = {
+    ...taquillaCajaState,
+    cierre: new Date().toISOString(),
+    efectivo_esperado: esperado,
+    efectivo_real: real,
+    diferencia: diferencia,
+    operador: userProfile.nombre
+  };
+  
+  await _sb.from('rfid_cash_register_closures').insert(cierre);
+  
+  // Resetear estado
+  taquillaCajaState = {
+    apertura: null,
+    efectivoInicial: 0,
+    ventasEfectivo: 0,
+    ventasTarjeta: 0,
+    ventasMixto: 0,
+    totalVentas: 0,
+    entradasVendidas: 0,
+    pulseras: 0
+  };
+  
+  await saveCajaState();
+  
+  closeModal();
+  
+  // Mostrar resultado
+  showResult('success', '🔒', 
+    'Caja cerrada correctamente',
+    `Total ventas: ${fmt(cierre.totalVentas)}€${diferencia !== 0 ? ` · Dif: ${fmt(diferencia)}€` : ''}`
+  );
+  
+  setTimeout(() => {
+    hideResult();
+    renderTaquillaCaja(document.getElementById('page-content'));
+  }, 2500);
+}
+
+async function saveCajaState() {
+  sessionStorage.setItem('taquilla_caja_state', JSON.stringify(taquillaCajaState));
+}
+
+async function loadCajaState() {
+  const saved = sessionStorage.getItem('taquilla_caja_state');
+  if (saved) {
+    taquillaCajaState = JSON.parse(saved);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  PANTALLA 4: REPORTES DE TAQUILLA
+// ════════════════════════════════════════════════════════════════════════════
+
+async function renderTaquillaReportes(pc) {
+  pc.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Cargando reportes...</div>';
+  
+  // Cargar datos
+  const ventas = await loadVentasTaquilla();
+  const cierres = await loadCierresCaja();
+  
+  // Calcular totales
+  const totalVentas = ventas.reduce((sum, v) => sum + parseFloat(v.total || 0), 0);
+  const totalEntradas = ventas.reduce((sum, v) => sum + parseInt(v.pulseras_emitidas || 0), 0);
+  const ventasEfectivo = ventas.filter(v => v.metodo_pago === 'efectivo')
+    .reduce((sum, v) => sum + parseFloat(v.total || 0), 0);
+  const ventasTarjeta = ventas.filter(v => v.metodo_pago === 'tarjeta')
+    .reduce((sum, v) => sum + parseFloat(v.total || 0), 0);
+  
+  pc.innerHTML = `
+    <div>
+      
+      <!-- Header -->
+      <div style="margin-bottom:24px">
+        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:28px;margin-bottom:6px">
+          📊 Reportes de Taquilla
+        </div>
+        <div style="font-size:13px;color:var(--muted)">
+          Evento: <strong style="color:var(--a3)">${selectedEvent?.nombre || '—'}</strong>
+        </div>
+      </div>
+      
+      <!-- KPIs principales -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px">
+        <div class="card" style="text-align:center;padding:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+            Total vendido
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a1)">
+            ${fmt(totalVentas)}€
+          </div>
+        </div>
+        
+        <div class="card" style="text-align:center;padding:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+            Entradas
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a3)">
+            ${totalEntradas}
+          </div>
+        </div>
+        
+        <div class="card" style="text-align:center;padding:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+            Efectivo
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--success)">
+            ${fmt(ventasEfectivo)}€
+          </div>
+        </div>
+        
+        <div class="card" style="text-align:center;padding:20px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px">
+            Tarjeta
+          </div>
+          <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--a2)">
+            ${fmt(ventasTarjeta)}€
+          </div>
+        </div>
+      </div>
+      
+      <!-- Comparativa Web vs Taquilla -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title">Comparativa de canales</div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div style="text-align:center;padding:20px;background:rgba(0,212,255,.05);border-radius:10px">
+            <div style="font-size:13px;color:var(--muted);margin-bottom:8px">🌐 VENTA WEB</div>
+            <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:var(--a3)">
+              —€
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">
+              Comisión: ${TAQUILLA_CONFIG.COMISION_WEB}%
+            </div>
+          </div>
+          
+          <div style="text-align:center;padding:20px;background:rgba(200,255,0,.05);border-radius:10px">
+            <div style="font-size:13px;color:var(--muted);margin-bottom:8px">🎫 TAQUILLA FÍSICA</div>
+            <div style="font-family:'Syne',sans-serif;font-size:32px;font-weight:800;color:var(--a1)">
+              ${fmt(totalVentas)}€
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">
+              Comisión: ${TAQUILLA_CONFIG.COMISION_TAQUILLA}% (+${TAQUILLA_CONFIG.COMISION_TAQUILLA - TAQUILLA_CONFIG.COMISION_WEB}%)
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Últimos cierres de caja -->
+      ${cierres.length > 0 ? `
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-title">Últimos cierres de caja</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Operador</th>
+                  <th style="text-align:right">Total ventas</th>
+                  <th style="text-align:right">Efectivo</th>
+                  <th style="text-align:right">Tarjeta</th>
+                  <th style="text-align:right">Diferencia</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${cierres.slice(0, 10).map(c => `
+                  <tr>
+                    <td style="font-size:12px;color:var(--muted)">${fmtDate(c.cierre)}</td>
+                    <td style="font-size:13px">${c.operador}</td>
+                    <td style="text-align:right;font-weight:600">${fmt(c.totalVentas)}€</td>
+                    <td style="text-align:right">${fmt(c.ventasEfectivo)}€</td>
+                    <td style="text-align:right">${fmt(c.ventasTarjeta)}€</td>
+                    <td style="text-align:right;color:${c.diferencia === 0 ? 'var(--muted)' : c.diferencia > 0 ? 'var(--success)' : 'var(--danger)'}">
+                      ${c.diferencia === 0 ? '—' : (c.diferencia > 0 ? '+' : '') + fmt(c.diferencia) + '€'}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+      
+      <!-- Botones de exportación -->
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-g" onclick="exportarReporteCSV()">
+          📥 Exportar CSV
+        </button>
+        <button class="btn btn-g" onclick="exportarReportePDF()">
+          📄 Exportar PDF
+        </button>
+        <button class="btn btn-p" onclick="imprimirReporte()">
+          🖨️ Imprimir reporte
+        </button>
+      </div>
+      
+    </div>
+  `;
+}
+
+async function loadVentasTaquilla() {
+  if (!selectedEvent) return [];
+  
+  const { data } = await _sb
+    .from('rfid_ticket_sales')
+    .select('*')
+    .eq('event_id', selectedEvent.id)
+    .eq('canal', 'taquilla_fisica')
+    .order('fecha', { ascending: false });
+  
+  return data || [];
+}
+
+async function loadCierresCaja() {
+  const { data } = await _sb
+    .from('rfid_cash_register_closures')
+    .select('*')
+    .order('cierre', { ascending: false })
+    .limit(20);
+  
+  return data || [];
+}
+
+function exportarReporteCSV() {
+  toast('📥 Generando CSV...');
+  // Implementar exportación CSV
+}
+
+function exportarReportePDF() {
+  toast('📄 Generando PDF...');
+  // Implementar exportación PDF
+}
+
+function imprimirReporte() {
+  window.print();
+}
+
+</script>
+</style>
+  
 </script>
 
 </body>
