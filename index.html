@@ -459,11 +459,10 @@ function navigate(page){
   closeSidebar();
   const pc=document.getElementById('page-content');
   ({
-  pos:renderPOS, topup:renderTopup, register:renderRegister,
-  access:renderAccess, balance:renderBalance, transactions:renderTransactions,
-  dashboard:renderDashboard, products:renderProducts, config:renderConfig,
-  taquilla:renderTaquilla, 'taquilla-caja':renderTaquillaCaja
-}[page]||renderPOS)(pc);
+    pos:renderPOS, topup:renderTopup, register:renderRegister,
+    access:renderAccess, balance:renderBalance, transactions:renderTransactions,
+    dashboard:renderDashboard, products:renderProducts, config:renderConfig
+  }[page]||renderPOS)(pc);
 }
 window.addEventListener('hashchange',()=>{const h=window.location.hash.replace('#','');if(h&&h!==currentPage)navigate(h);});
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').style.display='block';}
@@ -1275,6 +1274,31 @@ async function loadTiposEntrada() {
 
 async function renderTaquilla(pc) {
   await loadTiposEntrada();
+  await loadCajaState();
+  
+  // Verificar si la caja está cerrada
+  const cajaAbierta = taquillaCajaState.apertura !== null;
+  
+  if (!cajaAbierta) {
+    pc.innerHTML = `
+      <div style="max-width:600px;margin:60px auto;text-align:center">
+        <div class="card" style="padding:50px 40px">
+          <div style="font-size:80px;margin-bottom:20px">🔒</div>
+          <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;margin-bottom:12px;color:var(--danger)">
+            CAJA CERRADA
+          </div>
+          <div style="font-size:15px;color:var(--muted);margin-bottom:30px;line-height:1.6">
+            Debes abrir la caja antes de poder vender entradas.<br>
+            Esto permite un control adecuado del efectivo y las transacciones.
+          </div>
+          <button class="btn btn-p btn-lg btn-full" onclick="navigate('taquilla-caja')">
+            🔓 Ir a Gestión de Caja
+          </button>
+        </div>
+      </div>
+    `;
+    return;
+  }
   
   pc.innerHTML = `
     <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:20px;height:calc(100vh - 120px)">
@@ -1294,6 +1318,13 @@ async function renderTaquilla(pc) {
           <div class="badge b-green" style="font-size:13px;padding:6px 14px">
             <span style="font-size:16px;margin-right:6px">🟢</span>
             CAJA ABIERTA
+          </div>
+        </div>
+        
+        <div style="padding:10px 16px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.2);border-radius:10px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <span>✅</span>
+            <span style="color:var(--success)">Caja abierta desde ${new Date(taquillaCajaState.apertura).toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'})}</span>
           </div>
         </div>
         
@@ -1662,12 +1693,20 @@ async function confirmarVentaTaquilla() {
   const btn = document.querySelector('#modal-box .btn-p');
   if (!btn) return;
   
+  // Validar efectivo si aplica
   if (taquillaMetodoPago === 'efectivo' || taquillaMetodoPago === 'mixto') {
     const recibido = parseFloat(document.getElementById('efectivo-recibido')?.value || 0);
     if (recibido < taquillaTotal) {
       toast('⚠️ El efectivo recibido es insuficiente');
       return;
     }
+  }
+  
+  // Si es pago con tarjeta, usar Stripe Terminal
+  if (taquillaMetodoPago === 'tarjeta') {
+    closeModal();
+    await procesarPagoStripeTerminal();
+    return;
   }
   
   btn.disabled = true;
@@ -2362,6 +2401,257 @@ async function loadCajaState() {
   if (saved) {
     taquillaCajaState = JSON.parse(saved);
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  STRIPE TERMINAL - Cobro con datáfono físico
+// ════════════════════════════════════════════════════════════════════════════
+
+let stripeTerminal = null;
+let stripeTerminalReader = null;
+
+async function inicializarStripeTerminal() {
+  if (stripeTerminal) return stripeTerminal;
+  
+  try {
+    // Cargar SDK de Stripe Terminal
+    if (!window.StripeTerminal) {
+      const script = document.createElement('script');
+      script.src = 'https://js.stripe.com/terminal/v1/';
+      script.async = true;
+      document.head.appendChild(script);
+      await new Promise((resolve, reject) => {
+        script.onload = resolve;
+        script.onerror = reject;
+      });
+    }
+    
+    // Inicializar Stripe Terminal
+    stripeTerminal = window.StripeTerminal.create({
+      onFetchConnectionToken: async () => {
+        const response = await fetch('https://inout-api.vercel.app/api/stripe/connection-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        return data.secret;
+      },
+      onUnexpectedReaderDisconnect: () => {
+        toast('⚠️ Datáfono desconectado');
+        stripeTerminalReader = null;
+      }
+    });
+    
+    console.log('✅ Stripe Terminal inicializado');
+    return stripeTerminal;
+    
+  } catch (error) {
+    console.error('Error inicializando Stripe Terminal:', error);
+    toast('❌ Error inicializando datáfono');
+    return null;
+  }
+}
+
+async function conectarDatafono() {
+  const terminal = await inicializarStripeTerminal();
+  if (!terminal) return null;
+  
+  if (stripeTerminalReader) {
+    console.log('✅ Datáfono ya conectado');
+    return stripeTerminalReader;
+  }
+  
+  try {
+    // Descubrir lectores disponibles
+    const discoverResult = await terminal.discoverReaders({
+      simulated: false, // Cambiar a true para testing sin hardware
+      location: 'tu-location-id' // Obtener de Stripe Dashboard
+    });
+    
+    if (discoverResult.error) {
+      throw new Error(discoverResult.error.message);
+    }
+    
+    if (discoverResult.discoveredReaders.length === 0) {
+      throw new Error('No se encontró ningún datáfono');
+    }
+    
+    // Conectar al primer lector disponible
+    const connectResult = await terminal.connectReader(discoverResult.discoveredReaders[0]);
+    
+    if (connectResult.error) {
+      throw new Error(connectResult.error.message);
+    }
+    
+    stripeTerminalReader = connectResult.reader;
+    console.log('✅ Datáfono conectado:', stripeTerminalReader.label);
+    return stripeTerminalReader;
+    
+  } catch (error) {
+    console.error('Error conectando datáfono:', error);
+    toast('❌ ' + error.message);
+    return null;
+  }
+}
+
+async function procesarPagoStripeTerminal() {
+  document.getElementById('page-content').innerHTML = `
+    <div style="max-width:500px;margin:40px auto;text-align:center">
+      <div class="card">
+        <div style="font-size:64px;margin-bottom:16px">💳</div>
+        <div style="font-family:Syne;font-size:24px;font-weight:700;margin-bottom:8px">
+          Conectando datáfono...
+        </div>
+        <div id="terminal-status" style="font-size:15px;color:var(--muted);margin-bottom:16px">
+          Buscando Stripe Reader...
+        </div>
+        <div style="font-family:Syne;font-size:42px;font-weight:800;color:var(--a1);margin:16px 0">
+          ${fmt(taquillaTotal)}€
+        </div>
+        <button class="btn btn-danger btn-full" style="margin-top:16px" onclick="cancelarPagoTerminal()">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  `;
+  
+  try {
+    const statusEl = document.getElementById('terminal-status');
+    
+    // Conectar datáfono
+    statusEl.textContent = 'Conectando al datáfono...';
+    const reader = await conectarDatafono();
+    
+    if (!reader) {
+      throw new Error('No se pudo conectar al datáfono');
+    }
+    
+    statusEl.textContent = `Conectado: ${reader.label || 'Stripe Reader'}`;
+    
+    // Crear Payment Intent en el backend
+    statusEl.textContent = 'Creando pago...';
+    const response = await fetch('https://inout-api.vercel.app/api/stripe/terminal-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: Math.round(taquillaTotal * 100), // Stripe usa centavos
+        currency: 'eur',
+        description: `Taquilla - ${taquillaCart.map(i => {
+          const e = tiposEntrada.find(t => t.id === i.id);
+          return `${i.cantidad}x ${e.nombre}`;
+        }).join(', ')}`,
+        metadata: {
+          event_id: selectedEvent?.id,
+          operator: userProfile.nombre,
+          canal: 'taquilla_fisica'
+        }
+      })
+    });
+    
+    const paymentData = await response.json();
+    
+    if (paymentData.error) {
+      throw new Error(paymentData.error);
+    }
+    
+    // Procesar pago en el datáfono
+    statusEl.innerHTML = '💳 <strong style="color:var(--a1)">Presenta la tarjeta en el datáfono</strong>';
+    
+    const result = await stripeTerminal.collectPaymentMethod(paymentData.client_secret);
+    
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+    
+    statusEl.textContent = 'Procesando pago...';
+    
+    const confirmResult = await stripeTerminal.processPayment(result.paymentIntent);
+    
+    if (confirmResult.error) {
+      throw new Error(confirmResult.error.message);
+    }
+    
+    if (confirmResult.paymentIntent.status === 'succeeded') {
+      // Pago exitoso - registrar venta
+      await registrarVentaTaquilla(confirmResult.paymentIntent.id);
+      
+    } else {
+      throw new Error('El pago no se completó');
+    }
+    
+  } catch (error) {
+    console.error('Error en pago terminal:', error);
+    showResult('error', '❌', 'Error en el pago', error.message);
+    setTimeout(() => {
+      hideResult();
+      renderTaquilla(document.getElementById('page-content'));
+    }, 3000);
+  }
+}
+
+async function registrarVentaTaquilla(paymentIntentId) {
+  try {
+    const venta = {
+      fecha: new Date().toISOString(),
+      items: taquillaCart.map(item => {
+        const entrada = tiposEntrada.find(t => t.id === item.id);
+        return {
+          tipo_entrada_id: entrada.id,
+          nombre: entrada.nombre,
+          precio_unitario: entrada.precio,
+          cantidad: item.cantidad,
+          subtotal: entrada.precio * item.cantidad
+        };
+      }),
+      subtotal: taquillaTotal / (1 + TAQUILLA_CONFIG.COMISION_TAQUILLA / 100),
+      comision: taquillaTotal - (taquillaTotal / (1 + TAQUILLA_CONFIG.COMISION_TAQUILLA / 100)),
+      total: taquillaTotal,
+      metodo_pago: 'tarjeta',
+      operador: userProfile.nombre,
+      event_id: selectedEvent?.id,
+      canal: 'taquilla_fisica',
+      pulseras_emitidas: taquillaCart.reduce((sum, item) => sum + item.cantidad, 0),
+      stripe_payment_intent: paymentIntentId
+    };
+    
+    const { data, error } = await _sb
+      .from('rfid_ticket_sales')
+      .insert(venta)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // Actualizar stock
+    for (const item of taquillaCart) {
+      const entrada = tiposEntrada.find(t => t.id === item.id);
+      entrada.stock -= item.cantidad;
+    }
+    
+    // Actualizar caja
+    taquillaCajaState.ventasTarjeta += taquillaTotal;
+    taquillaCajaState.totalVentas += taquillaTotal;
+    taquillaCajaState.entradasVendidas += venta.pulseras_emitidas;
+    await saveCajaState();
+    
+    taquillaSalesHistory.unshift(venta);
+    
+    await mostrarResultadoVenta(venta, data.id);
+    
+    taquillaCart = [];
+    
+  } catch (error) {
+    console.error('Error registrando venta:', error);
+    throw error;
+  }
+}
+
+function cancelarPagoTerminal() {
+  if (stripeTerminal) {
+    stripeTerminal.cancelCollectPaymentMethod();
+  }
+  toast('Pago cancelado');
+  renderTaquilla(document.getElementById('page-content'));
 }
 
 </script>
