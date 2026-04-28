@@ -1141,6 +1141,142 @@ function hideResult(){document.getElementById('result-overlay')?.remove();}
   } else {
     document.getElementById('login-screen').style.display='flex';
   }
+
+// ════════════════════════════════════════════════════════════════════════════
+//  SISTEMA DE HEARTBEAT - Monitoreo de dispositivos en tiempo real
+// ════════════════════════════════════════════════════════════════════════════
+
+const DEVICE_HEARTBEAT_CONFIG = {
+  type: 'valid',
+  name: 'inout-valid',
+  url: 'https://inout-valid.vercel.app',
+  interval: 30000 // 30 segundos
+};
+
+class DeviceHeartbeat {
+  constructor() {
+    this.deviceId = this.getOrCreateDeviceId();
+    this.intervalId = null;
+    this.isActive = false;
+    this.currentUser = null;
+    this.userProfile = null;
+    
+    console.log('🔔 Heartbeat iniciado — Device ID:', this.deviceId);
+  }
+  
+  getOrCreateDeviceId() {
+    const storageKey = `inout_device_id_${DEVICE_HEARTBEAT_CONFIG.type}`;
+    let deviceId = localStorage.getItem(storageKey);
+    
+    if (!deviceId) {
+      deviceId = `${DEVICE_HEARTBEAT_CONFIG.type}-${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem(storageKey, deviceId);
+      console.log('📱 Nuevo Device ID generado:', deviceId);
+    }
+    
+    return deviceId;
+  }
+  
+  init(user, profile) {
+    this.currentUser = user;
+    this.userProfile = profile;
+    console.log('✅ Heartbeat configurado con usuario:', profile?.nombre || 'Sin usuario');
+  }
+  
+  start() {
+    if (this.isActive) return;
+    
+    this.isActive = true;
+    this.sendHeartbeat(); // Inmediato
+    
+    this.intervalId = setInterval(() => {
+      this.sendHeartbeat();
+    }, DEVICE_HEARTBEAT_CONFIG.interval);
+    
+    console.log(`🔔 Heartbeat activo — cada ${DEVICE_HEARTBEAT_CONFIG.interval / 1000}s`);
+  }
+  
+  stop() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    this.isActive = false;
+    console.log('🔕 Heartbeat detenido');
+  }
+  
+  updateUser(user, profile) {
+    this.currentUser = user;
+    this.userProfile = profile;
+  }
+  
+  async sendHeartbeat() {
+    try {
+      const deviceLocation = localStorage.getItem('device_location') || 
+                            (selectedEvent ? `Evento: ${selectedEvent.nombre}` : 'Sin ubicación');
+      
+      const metadata = {
+        app_version: '1.0.0',
+        screen_resolution: `${window.screen.width}x${window.screen.height}`,
+        browser: navigator.userAgent.split('(')[0].trim(),
+        last_heartbeat: new Date().toISOString(),
+        evento_actual: selectedEvent?.nombre || null,
+        nfc_status: nfcSupported ? 'active' : 'inactive'
+      };
+      
+      const { data, error } = await _sb.rpc('register_device_heartbeat', {
+        p_device_id: this.deviceId,
+        p_type: DEVICE_HEARTBEAT_CONFIG.type,
+        p_name: DEVICE_HEARTBEAT_CONFIG.name,
+        p_url: DEVICE_HEARTBEAT_CONFIG.url,
+        p_location: deviceLocation,
+        p_user_id: this.currentUser?.id || null,
+        p_empleado_id: this.userProfile?.id || null,
+        p_organization_id: this.userProfile?.organization_id || null,
+        p_user_email: this.currentUser?.email || this.userProfile?.email || null,
+        p_user_name: this.userProfile?.nombre || null,
+        p_user_role: this.userProfile?.role || null,
+        p_last_url: window.location.href,
+        p_user_agent: navigator.userAgent,
+        p_metadata: metadata
+      });
+      
+      if (error) {
+        console.error('❌ Error heartbeat:', error);
+        return;
+      }
+      
+      console.log('💚 Heartbeat enviado');
+      
+    } catch (err) {
+      console.error('❌ Excepción heartbeat:', err);
+    }
+  }
+  
+  setLocation(locationName) {
+    localStorage.setItem('device_location', locationName);
+    console.log('📍 Ubicación actualizada:', locationName);
+  }
+}
+
+// Instancia global
+window.deviceHeartbeat = new DeviceHeartbeat();
+
+// Detener heartbeat al cerrar
+window.addEventListener('beforeunload', () => {
+  if (window.deviceHeartbeat.isActive) {
+    window.deviceHeartbeat.sendHeartbeat();
+    window.deviceHeartbeat.stop();
+  }
+});
+
+// Reanudar heartbeat al volver de minimizar
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && window.deviceHeartbeat.isActive) {
+    window.deviceHeartbeat.sendHeartbeat();
+  }
+});
+  
 })();
 </script>
 
