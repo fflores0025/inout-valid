@@ -409,6 +409,9 @@ async function doLogin(){
 document.getElementById('login-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
 async function doLogout(){
+  // ⚡ DETENER HEARTBEAT
+  window.deviceHeartbeat.stop();
+  
   await _sb.auth.signOut();
   currentUser=null; userProfile=null;
   document.getElementById('app').style.display='none';
@@ -425,6 +428,11 @@ async function enterApp(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('tb-user').textContent=userProfile.nombre;
+  
+  // ⚡ INICIAR HEARTBEAT
+  window.deviceHeartbeat.init(currentUser, userProfile);
+  window.deviceHeartbeat.start();
+  
   buildNav();
   await loadEvents();
   await loadPOS();
@@ -1134,6 +1142,11 @@ function hideResult(){document.getElementById('result-overlay')?.remove();}
     const{data:p}=await _sb.from('empleados').select('*').eq('auth_user_id',currentUser.id).single();
     if(p){
       userProfile={nombre:p.nombre,role:p.role,email:p.email,id:p.id};
+      
+      // ⚡ AUTO-INICIAR HEARTBEAT
+      window.deviceHeartbeat.init(currentUser, userProfile);
+      window.deviceHeartbeat.start();
+      
       enterApp();
     } else {
       document.getElementById('login-screen').style.display='flex';
@@ -1141,6 +1154,7 @@ function hideResult(){document.getElementById('result-overlay')?.remove();}
   } else {
     document.getElementById('login-screen').style.display='flex';
   }
+})();
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SISTEMA DE HEARTBEAT - Monitoreo de dispositivos en tiempo real
