@@ -469,9 +469,11 @@ function navigate(page){
   ({
     pos:renderPOS, topup:renderTopup, register:renderRegister,
     access:renderAccess, balance:renderBalance, transactions:renderTransactions,
-    dashboard:renderDashboard, products:renderProducts, config:renderConfig
+    dashboard:renderDashboard, products:renderProducts, config:renderConfig,
+    taquilla:renderTaquilla, 'taquilla-caja':renderTaquillaCaja
   }[page]||renderPOS)(pc);
 }
+  
 window.addEventListener('hashchange',()=>{const h=window.location.hash.replace('#','');if(h&&h!==currentPage)navigate(h);});
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('overlay').style.display='block';}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').style.display='none';}
