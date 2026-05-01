@@ -1390,31 +1390,29 @@ PAGE_TITLES['taquilla-caja'] = 'Gestión de Caja';
 
 async function loadTiposEntrada() {
   if (!selectedEvent) return;
-  
   try {
     const { data } = await _sb
-      .from('rfid_ticket_types')
+      .from('rfid_products')
       .select('*')
       .eq('event_id', selectedEvent.id)
       .eq('active', true)
       .order('sort_order');
-    
     if (data && data.length > 0) {
       tiposEntrada = data.map(t => ({
         id: t.id,
         nombre: t.name,
         precio: parseFloat(t.price),
         categoria: t.category || 'general',
-        stock: t.stock || 0,
-        descripcion: t.description || '',
-        color: t.color || '#00d4ff'
+        stock: 999,
+        descripcion: t.category || '',
+        color: '#00d4ff'
       }));
     }
   } catch (error) {
-    console.log('Usando tipos de entrada por defecto');
+    console.log('Sin productos, usando defaults');
   }
 }
-
+  
 async function renderTaquilla(pc) {
   await loadTiposEntrada();
   await loadCajaState();
