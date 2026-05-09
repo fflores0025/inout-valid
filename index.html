@@ -1705,9 +1705,12 @@ if (totalEl) totalEl.textContent = fmt(total) + '€';
 taquillaTotal = total;
 }
 function selectPaymentMethod(method) {
-taquillaMetodoPago = method;
-document.querySelectorAll('.taq-payment-btn').forEach(btn => btn.classList.remove('active'));
-document.querySelector([data-method="${method}"])?.classList.add('active');
+  taquillaMetodoPago = method;
+  document.querySelectorAll('.taq-payment-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  const selectedBtn = document.querySelector('[data-method="' + method + '"]');
+  if(selectedBtn) selectedBtn.classList.add('active');
 }
 async function procesarVentaTaquilla() {
 if (taquillaCart.length === 0) {
