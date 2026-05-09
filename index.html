@@ -1958,8 +1958,8 @@ pulseras: 0
 };
 await saveCajaState();
 closeModal();
-showResult('success', '🔒', 'Caja cerrada correctamente', Total ventas: ${fmt(cierre.totalVentas)}€${diferencia !== 0 ?  · Dif: ${fmt(diferencia)}€ : ''});
-setTimeout(() => {
+showResult('success', '🔒', 'Caja cerrada correctamente', `Total ventas: ${fmt(cierre.totalVentas)}€${diferencia !== 0 ? ` · Dif: ${fmt(diferencia)}€` : ''}`);
+  setTimeout(() => {
 hideResult();
 renderTaquillaCaja(document.getElementById('page-content'));
 }, 2500);
