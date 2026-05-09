@@ -263,7 +263,7 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 });
 
 function modalAddProduct(){
-  const categories = ['Bebidas','Comida','Merch','General','Otros'];
+  const categories = ['Bebidas Alcoholicas','Refrescos','Vinos','VIP','Aperitivos'.'Comida','Merch','General','Otros'];
   document.getElementById('modal-box').innerHTML=`
     <div class="modal-title">🏷️ Nuevo producto</div>
     <div class="modal-sub">Añadir producto al catálogo del evento</div>
@@ -276,6 +276,14 @@ function modalAddProduct(){
     <select class="form-select" id="mp-cat">
       ${categories.map(c=>`<option value="${c}">${c}</option>`).join('')}
     </select>
+    <label class="form-lbl">Control de stock</label>
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+      <input class="form-input" id="mp-stock" type="number" min="0" step="1" placeholder="Dejar vacío = ilimitado" style="flex:1;margin-bottom:0"/>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer">
+        <input type="checkbox" id="mp-unlimited" onchange="document.getElementById('mp-stock').disabled=this.checked;document.getElementById('mp-stock').value=''"/>
+        Ilimitado
+      </label>
+    </div>
     <div style="display:flex;gap:10px;margin-top:4px">
       <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-p" style="flex:2" onclick="submitAddProduct()">Añadir producto</button>
@@ -293,6 +301,8 @@ function modalEditProduct(productId){
   if(!product) return;
   
   const categories = ['Bebidas','Comida','Merch','General','Otros'];
+  const hasStock = product.stock !== null;
+  
   document.getElementById('modal-box').innerHTML=`
     <div class="modal-title">✏️ Editar producto</div>
     <div class="modal-sub">Modificar "${product.name}"</div>
@@ -305,6 +315,18 @@ function modalEditProduct(productId){
     <select class="form-select" id="ep-cat">
       ${categories.map(c=>`<option value="${c}" ${product.category===c?'selected':''}>${c}</option>`).join('')}
     </select>
+    <label class="form-lbl">Control de stock</label>
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+      <input class="form-input" id="ep-stock" type="number" min="0" step="1" 
+        value="${hasStock ? product.stock : ''}" 
+        ${!hasStock ? 'disabled' : ''}
+        placeholder="Dejar vacío = ilimitado" style="flex:1;margin-bottom:0"/>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer">
+        <input type="checkbox" id="ep-unlimited" ${!hasStock ? 'checked' : ''} 
+          onchange="document.getElementById('ep-stock').disabled=this.checked;if(this.checked)document.getElementById('ep-stock').value=''"/>
+        Ilimitado
+      </label>
+    </div>
     <div style="display:flex;gap:10px;margin-top:4px">
       <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-p" style="flex:2" onclick="submitEditProduct('${productId}')">Guardar cambios</button>
@@ -317,6 +339,10 @@ async function submitEditProduct(productId){
   const nombre = document.getElementById('ep-nombre')?.value?.trim();
   const precio = parseFloat(document.getElementById('ep-precio')?.value);
   const cat    = document.getElementById('ep-cat')?.value || 'General';
+  const stockInput = document.getElementById('ep-stock')?.value?.trim();
+  const unlimited = document.getElementById('ep-unlimited')?.checked;
+  const stock = unlimited ? null : (stockInput ? parseInt(stockInput) : null);
+  
   const err    = document.getElementById('modal-err');
   
   if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
@@ -326,7 +352,7 @@ async function submitEditProduct(productId){
   if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
   
   const{error}=await _sb.from('rfid_products')
-    .update({name: nombre, price: precio, category: cat})
+    .update({name: nombre, price: precio, category: cat, stock: stock})
     .eq('id', productId);
     
   if(error){ 
@@ -346,15 +372,27 @@ async function submitAddProduct(){
   const nombre = document.getElementById('mp-nombre')?.value?.trim();
   const precio = parseFloat(document.getElementById('mp-precio')?.value);
   const cat    = document.getElementById('mp-cat')?.value || 'General';
+  const stockInput = document.getElementById('mp-stock')?.value?.trim();
+  const unlimited = document.getElementById('mp-unlimited')?.checked;
+  const stock = unlimited ? null : (stockInput ? parseInt(stockInput) : null);
+  
   const err    = document.getElementById('modal-err');
   if(!nombre){ err.textContent='El nombre es obligatorio'; err.style.display='block'; return; }
   if(!precio || precio <= 0){ err.textContent='Introduce un precio válido'; err.style.display='block'; return; }
+  
   const btn = document.querySelector('#modal-box .btn-p');
   if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  
   const{error}=await _sb.from('rfid_products').insert({
-    event_id: selectedEvent?.id, name: nombre, price: precio,
-    category: cat, active: true, sort_order: posProducts.length
+    event_id: selectedEvent?.id, 
+    name: nombre, 
+    price: precio,
+    category: cat, 
+    stock: stock,
+    active: true, 
+    sort_order: posProducts.length
   });
+  
   if(error){ err.textContent='Error: '+error.message; err.style.display='block'; if(btn){btn.disabled=false;btn.textContent='Añadir producto';} return; }
   closeModal();
   toast(`"${nombre}" añadido ✓`);
@@ -652,8 +690,10 @@ function startPOSCharge(){
 function cancelPOSCharge(){
   document.getElementById('pos-scan-area').style.display='none';
   document.getElementById('pos-cart-card').style.display='block';
-}
+}  
 
+
+  
 async function onPOSScan(uid){
   const scanArea=document.getElementById('pos-scan-area');
   if(!scanArea||scanArea.style.display==='none') return;
@@ -667,6 +707,34 @@ async function onPOSScan(uid){
   if(wb.status!=='active'){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='🚫';sub.textContent='Pulsera bloqueada';setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},2000);return;}
   if(parseFloat(wb.balance)<total){ring.className='nfc-ring error';ring.querySelector('.emoji').textContent='💸';sub.textContent=`Saldo insuficiente: ${fmt(wb.balance)}€ (necesita ${fmt(total)}€)`;if(navigator.vibrate)navigator.vibrate([200,100,200]);setTimeout(()=>{ring.className='nfc-ring scanning';ring.querySelector('.emoji').textContent='📡';sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;},3000);return;}
 
+// VALIDAR Y DESCONTAR STOCK
+for(const[productId, qty] of Object.entries(posCart)){
+  const product = posProducts.find(p => p.id === productId);
+  if(!product) continue;
+  
+  // Si el producto tiene stock limitado
+  if(product.stock !== null){
+    // Verificar que hay suficiente stock
+    if(product.stock < qty){
+      ring.className='nfc-ring error';
+      ring.querySelector('.emoji').textContent='📦';
+      sub.textContent=`Stock insuficiente de ${product.name} (quedan ${product.stock}, necesitas ${qty})`;
+      if(navigator.vibrate) navigator.vibrate([200,100,200]);
+      setTimeout(()=>{
+        ring.className='nfc-ring scanning';
+        ring.querySelector('.emoji').textContent='📡';
+        sub.textContent=`Total: ${fmt(total)}€ — Esperando pulsera...`;
+      }, 3000);
+      return;
+    }
+    
+    // Descontar stock
+    await _sb.from('rfid_products')
+      .update({stock: product.stock - qty})
+      .eq('id', productId);
+  }
+}
+  
   const newBal=parseFloat(wb.balance)-total;
   const desc=Object.entries(posCart).map(([id,qty])=>{const p=posProducts.find(x=>x.id===id);return p?p.name+' x'+qty:'';}).filter(Boolean).join(', ');
   await _sb.from('rfid_wristbands').update({balance:newBal,total_spent:parseFloat(wb.total_spent||0)+total,last_used_at:new Date().toISOString()}).eq('id',wb.id);
@@ -1128,15 +1196,28 @@ async function renderProducts(pc){
     <div style="font-family:Syne;font-weight:700;font-size:20px">${products.length} productos</div>
     <button class="btn btn-p" onclick="modalAddProduct()">+ Nuevo producto</button>
   </div>
-  ${!products.length
-    ? '<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:12px">🏷️</div><div style="color:var(--muted);margin-bottom:16px">Sin productos</div><button class="btn btn-p" onclick="modalAddProduct()">Crear primer producto</button></div>'
-    : `<div class="card" style="padding:0;overflow:hidden"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>Precio</th><th>Categoría</th><th>Estado</th><th style="text-align:right">Acciones</th></tr></thead><tbody>
-    ${products.map(p=>`<tr><td style="font-weight:500">${p.name}</td><td style="color:var(--a1);font-weight:700;font-family:Syne">${fmt(p.price)}€</td><td><span class="badge b-gray">${p.category||'—'}</span></td><td><span class="badge ${p.active?'b-green':'b-red'}">${p.active?'Activo':'Inactivo'}</span></td><td style="text-align:right">
-  <button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-height:34px;margin-right:6px" 
-    onclick="modalEditProduct('${p.id}')">✏️</button>
-  <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;min-height:34px" 
-    onclick="confirmDeleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">✕</button>
-</td></tr>`).join('')}
+${products.map(p=>`<tr>
+  <td style="font-weight:500">${p.name}</td>
+  <td style="color:var(--a1);font-weight:700;font-family:Syne">${fmt(p.price)}€</td>
+  <td>
+    ${p.stock === null 
+      ? '<span class="badge b-blue">∞ Ilimitado</span>' 
+      : p.stock === 0 
+        ? '<span class="badge b-red">⚠️ Agotado</span>'
+        : p.stock <= 5
+          ? '<span class="badge b-yellow">⚠️ ' + p.stock + ' uds</span>'
+          : '<span class="badge b-green">✓ ' + p.stock + ' uds</span>'
+    }
+  </td>
+  <td><span class="badge b-gray">${p.category||'—'}</span></td>
+  <td><span class="badge ${p.active?'b-green':'b-red'}">${p.active?'Activo':'Inactivo'}</span></td>
+  <td style="text-align:right">
+    <button class="btn btn-g" style="padding:5px 12px;font-size:12px;min-height:34px;margin-right:6px" 
+      onclick="modalEditProduct('${p.id}')">✏️</button>
+    <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;min-height:34px" 
+      onclick="confirmDeleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">✕</button>
+  </td>
+</tr>`).join('')}
     </tbody></table></div></div>`
   }`;
 }
