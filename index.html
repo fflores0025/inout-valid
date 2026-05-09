@@ -210,6 +210,15 @@ const SB_KEY = 'sb_publishable__-K1pC4bOJHRf8JQ__OOzg_jqLxlGla';
 const _sb = supabase.createClient(SB_URL, SB_KEY);
 
 let currentUser=null, userProfile=null, currentPage='pos';
+  // ════════════════════════════════════════
+//  CONFIGURACIÓN DEL DISPOSITIVO POS
+// ════════════════════════════════════════
+const DEVICE_POS_ID = localStorage.getItem('device_pos_id') || 'valid-' + Math.random().toString(36).substr(2, 6);
+if (!localStorage.getItem('device_pos_id')) {
+  localStorage.setItem('device_pos_id', DEVICE_POS_ID);
+}
+console.log('📍 POS ID del dispositivo:', DEVICE_POS_ID);
+  
 let selectedEvent=null, allEvents=[];
 let posProducts=[], posCart={}, allPOS=[];
 let nfcReader=null, nfcSupported=false, lastScannedUID=null;
@@ -604,7 +613,7 @@ async function onPOSScan(uid){
   const newBal=parseFloat(wb.balance)-total;
   const desc=Object.entries(posCart).map(([id,qty])=>{const p=posProducts.find(x=>x.id===id);return p?p.name+' x'+qty:'';}).filter(Boolean).join(', ');
   await _sb.from('rfid_wristbands').update({balance:newBal,total_spent:parseFloat(wb.total_spent||0)+total,last_used_at:new Date().toISOString()}).eq('id',wb.id);
-  await _sb.from('rfid_transactions').insert({wristband_id:wb.id,event_id:selectedEvent?.id,type:'purchase',amount:-total,balance_after:newBal,description:desc,point_of_sale:'POS',operator:userProfile.nombre,payment_method:'cashless'});
+  await _sb.from('rfid_transactions').insert({wristband_id:wb.id,event_id:selectedEvent?.id,type:'purchase',amount:-total,balance_after:newBal,description:desc,point_of_sale:'POS',pos_id:DEVICE_POS_ID,operator:userProfile.nombre,payment_method:'cashless'});
   showResult('success','✅','Cobrado: '+fmt(total)+'€','Saldo restante: '+fmt(newBal)+'€ · '+(wb.holder_name||''));
   posCart={};
   setTimeout(()=>{hideResult();cancelPOSCharge();updateCartUI();},2500);
@@ -796,7 +805,7 @@ async function executeManualTopup(){
   closeModal();
   const newBal=parseFloat(topupWristband.balance)+topupAmount;
   await _sb.from('rfid_wristbands').update({balance:newBal,total_loaded:parseFloat(topupWristband.total_loaded||0)+topupAmount,last_used_at:new Date().toISOString()}).eq('id',topupWristband.id);
-  await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'⚠️ Recarga manual ('+userProfile.nombre+')',point_of_sale:'Manual',operator:userProfile.nombre,payment_method:'manual'});
+  await _sb.from('rfid_transactions').insert({wristband_id:topupWristband.id,event_id:selectedEvent?.id,type:'topup',amount:topupAmount,balance_after:newBal,description:'⚠️ Recarga manual ('+userProfile.nombre+')',point_of_sale:'Manual',pos_id:DEVICE_POS_ID,operator:userProfile.nombre,payment_method:'manual'});
   showResult('success','⚠️','Recarga manual: +'+fmt(topupAmount)+'€','Nuevo saldo: '+fmt(newBal)+'€');
   topupWristband=null;topupAmount=0;
   setTimeout(()=>{hideResult();renderTopup(document.getElementById('page-content'));},2500);
