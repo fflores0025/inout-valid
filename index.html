@@ -263,7 +263,7 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 });
 
 function modalAddProduct(){
-  const categories = ['Bebidas Alcoholicas','Refrescos','Vinos','VIP','Aperitivos'.'Comida','Merch','General','Otros'];
+  const categories = ['Bebidas Alcoholicas','Refrescos','Vinos','VIP','Aperitivos','Comida','Merch','General','Otros'];
   document.getElementById('modal-box').innerHTML=`
     <div class="modal-title">🏷️ Nuevo producto</div>
     <div class="modal-sub">Añadir producto al catálogo del evento</div>
@@ -300,7 +300,7 @@ function modalEditProduct(productId){
   const product = posProducts.find(p => p.id === productId);
   if(!product) return;
   
-  const categories = ['Bebidas','Comida','Merch','General','Otros'];
+  const categories = ['Bebidas Alcoholicas','Refrescos','Vinos','VIP','Aperitivos','Comida','Merch','General','Otros'];
   const hasStock = product.stock !== null;
   
   document.getElementById('modal-box').innerHTML=`
