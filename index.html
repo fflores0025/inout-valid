@@ -1713,14 +1713,14 @@ function selectPaymentMethod(method) {
   if(selectedBtn) selectedBtn.classList.add('active');
 }
 async function procesarVentaTaquilla() {
-if (taquillaCart.length === 0) {
-toast('⚠️ El carrito está vacío');
-return;
-}
-const detalleVenta = taquillaCart.map(item => {
-const entrada = tiposEntrada.find(t => t.id === item.id);
-return ${item.cantidad}x ${entrada.nombre};
-}).join(', ');
+  if (taquillaCart.length === 0) {
+    toast('⚠️ El carrito está vacío');
+    return;
+  }
+  const detalleVenta = taquillaCart.map(item => {
+    const entrada = tiposEntrada.find(t => t.id === item.id);
+    return `${item.cantidad}x ${entrada.nombre}`;
+  }).join(', ');
 document.getElementById('modal-box').innerHTML =      <div class="modal-title">💰 Confirmar venta</div>     <div class="modal-sub">Revisa los datos antes de procesar</div>     <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">DETALLE DE VENTA</div>       <div style="font-size:13px;margin-bottom:12px;line-height:1.6">${detalleVenta}</div>       <div style="display:flex;justify-content:space-between;padding-top:12px;border-top:1px solid var(--border)">         <span style="font-size:13px;text-transform:uppercase;color:var(--muted)">Total</span>         <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--a1)">${fmt(taquillaTotal)}€</span>       </div>     </div>     <div style="background:rgba(200,255,0,.06);border:1px solid rgba(200,255,0,.15);border-radius:8px;padding:12px;margin-bottom:16px">       <div style="display:flex;align-items:center;gap:8px;font-size:13px">         <span>${taquillaMetodoPago === 'efectivo' ? '💵' : taquillaMetodoPago === 'tarjeta' ? '💳' : '💰'}</span>         <strong>Pago: ${taquillaMetodoPago.toUpperCase()}</strong>       </div>     </div>     <div id="modal-efectivo-input" style="display:${taquillaMetodoPago === 'efectivo' || taquillaMetodoPago === 'mixto' ? 'block' : 'none'};margin-bottom:16px">       <label class="form-lbl">Efectivo recibido (€)</label>       <input class="form-input" id="efectivo-recibido" type="number" min="0" step="0.01" placeholder="${fmt(taquillaTotal)}" autocomplete="off" onkeydown="if(event.key==='Enter')confirmarVentaTaquilla()"/>       <div id="cambio-display" style="font-size:12px;color:var(--success);margin-top:6px;display:none">Cambio: <strong id="cambio-amount">0,00€</strong></div>     </div>     <div style="display:flex;gap:10px">       <button class="btn btn-g" style="flex:1" onclick="closeModal()">Cancelar</button>       <button class="btn btn-p" style="flex:2" onclick="confirmarVentaTaquilla()">✅ Confirmar venta</button>     </div>;
 document.getElementById('modal-overlay').classList.add('show');
 setTimeout(() => {
