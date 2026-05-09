@@ -1797,9 +1797,7 @@ await saveCajaState();
 taquillaSalesHistory.unshift(venta);
 closeModal();
 
-showResult('success', '✅', 
-  `Venta procesada: ${fmt(venta.total)}€`, 
-  `${venta.pulseras_emitidas} entrada(s) · ${venta.metodo_pago.toUpperCase()}`);
+showResult('success', '✅', `Venta procesada: ${fmt(venta.total)}€`, `${venta.pulseras_emitidas} entrada(s) · ${venta.metodo_pago.toUpperCase()}`);
 taquillaCart = [];
 
 setTimeout(() => {
