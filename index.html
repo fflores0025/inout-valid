@@ -1617,7 +1617,7 @@ function renderEntradaCard(entrada) {
 }
 function renderTaquillaCart() {
 if (taquillaCart.length === 0) {
-return <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:20px">       <div style="font-size:48px;margin-bottom:12px;opacity:.5">🎫</div>       <div style="font-size:14px">Selecciona entradas para empezar</div>     </div>;
+return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:20px">       <div style="font-size:48px;margin-bottom:12px;opacity:.5">🎫</div>       <div style="font-size:14px">Selecciona entradas para empezar</div>     </div>;
 }
 return taquillaCart.map((item, index) => {
 const entrada = tiposEntrada.find(t => t.id === item.id);
